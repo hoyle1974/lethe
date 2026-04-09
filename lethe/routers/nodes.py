@@ -36,23 +36,21 @@ async def list_nodes(
 ) -> list[Node]:
     from lethe.infra.fs_helpers import FieldFilter
     col = db.collection(config.lethe_collection)
-    q = col.where(filter=FieldFilter("user_id", "==", user_id))
-    if node_type:
-        q = q.where(filter=FieldFilter("node_type", "==", node_type))
-    if domain:
-        q = q.where(filter=FieldFilter("domain", "==", domain))
-    q = q.order_by("created_at").limit(limit + offset)
+    # Only filter on user_id server-side; all other filters are client-side
+    # to avoid needing composite indexes on every field combination.
+    q = col.where(filter=FieldFilter("user_id", "==", user_id)).limit((limit + offset) * 5)
 
-    results: list[Node] = []
-    count = 0
+    all_results: list[Node] = []
     async for doc in q.stream():
-        if count < offset:
-            count += 1
+        data = doc.to_dict() or {}
+        if node_type and data.get("node_type") != node_type:
             continue
-        results.append(doc_to_node(doc.id, doc.to_dict() or {}))
-        if len(results) >= limit:
-            break
-    return results
+        if domain and data.get("domain") != domain:
+            continue
+        all_results.append(doc_to_node(doc.id, data))
+
+    all_results.sort(key=lambda n: n.created_at or "", reverse=False)
+    return all_results[offset: offset + limit]
 
 
 @router.delete("/v1/nodes/{uuid}", status_code=204)

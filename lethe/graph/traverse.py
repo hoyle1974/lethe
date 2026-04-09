@@ -1,8 +1,11 @@
 from __future__ import annotations
 import asyncio
+import logging
 from typing import Optional
 
 from google.cloud import firestore
+
+log = logging.getLogger(__name__)
 
 from lethe.config import Config
 from lethe.graph.search import cosine_similarity, doc_to_node
@@ -39,8 +42,7 @@ async def _fetch_nodes_by_ids(
     for i in range(0, len(ids), _BATCH_SIZE):
         chunk = ids[i:i + _BATCH_SIZE]
         refs = [col.document(uid) for uid in chunk]
-        snaps = await db.get_all(refs)
-        for snap in snaps:
+        async for snap in db.get_all(refs):
             if snap.exists:
                 data = snap.to_dict() or {}
                 result[snap.id] = doc_to_node(snap.id, data)
@@ -63,8 +65,11 @@ async def _get_incoming_spo_edges(
         .limit(50)
     )
     ids: list[str] = []
-    async for doc in q.stream():
-        ids.append(doc.id)
+    try:
+        async for doc in q.stream():
+            ids.append(doc.id)
+    except Exception as e:
+        log.warning("_get_incoming_spo_edges failed: %s", e)
     return ids
 
 
@@ -84,8 +89,11 @@ async def _get_nodes_linking_to(
         .limit(50)
     )
     ids: list[str] = []
-    async for doc in q.stream():
-        ids.append(doc.id)
+    try:
+        async for doc in q.stream():
+            ids.append(doc.id)
+    except Exception as e:
+        log.warning("_get_nodes_linking_to failed: %s", e)
     return ids
 
 

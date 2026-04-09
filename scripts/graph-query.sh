@@ -86,6 +86,7 @@ if echo "$SEARCH_RESP" | jq -e '.detail' > /dev/null 2>&1; then
 fi
 
 echo "Search response: $(echo "$SEARCH_RESP" | jq '{count, results: [.results[]? | {uuid, node_type, content: .content[0:60]}]}')"
+echo ""
 
 SEED_IDS=$(echo "$SEARCH_RESP" | jq -r '[.results[].uuid] | @json')
 

@@ -38,19 +38,20 @@ async def list_entries(
 ) -> list[Node]:
     from lethe.infra.fs_helpers import FieldFilter
     col = db.collection(config.lethe_collection)
-    q = (
-        col
-        .where(filter=FieldFilter("user_id", "==", user_id))
-        .where(filter=FieldFilter("node_type", "==", "log"))
-    )
-    if since:
-        q = q.where(filter=FieldFilter("created_at", ">=", since))
-    direction = "ASCENDING" if ascending else "DESCENDING"
-    q = q.order_by("created_at", direction=direction).limit(limit)
+    # Filter only on user_id server-side; node_type, since, and sort are
+    # handled client-side to avoid composite index requirements.
+    q = col.where(filter=FieldFilter("user_id", "==", user_id)).limit(limit * 10)
     results: list[Node] = []
     async for doc in q.stream():
-        results.append(doc_to_node(doc.id, doc.to_dict() or {}))
-    return results
+        data = doc.to_dict() or {}
+        if data.get("node_type") != "log":
+            continue
+        if since and data.get("created_at", "") < since:
+            continue
+        results.append(doc_to_node(doc.id, data))
+
+    results.sort(key=lambda n: n.created_at or "", reverse=not ascending)
+    return results[:limit]
 
 
 @router.delete("/v1/entries/{uuid}", status_code=204)

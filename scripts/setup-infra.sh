@@ -59,7 +59,18 @@ gcloud firestore databases create \
   --type=firestore-native \
   2>/dev/null || echo -e "${YELLOW}Firestore already initialized${NC}"
 
-echo -e "${CYAN}Deploying Firestore indexes...${NC}"
+echo -e "${CYAN}Creating Firestore vector index (embedding field)...${NC}"
+gcloud firestore indexes composite create \
+  --project="$PROJECT" \
+  --collection-group=nodes \
+  --query-scope=COLLECTION \
+  --field-config=order=ASCENDING,field-path=user_id \
+  --field-config="vector-config={\"dimension\":\"768\",\"flat\":\"{}\"},field-path=embedding" \
+  --quiet 2>/dev/null \
+  && echo -e "${GREEN}Vector index created (building in background)${NC}" \
+  || echo -e "${YELLOW}Vector index already exists or creation failed — check Firebase Console${NC}"
+
+echo -e "${CYAN}Deploying Firestore composite indexes...${NC}"
 if command -v firebase &>/dev/null; then
   firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive --force
 else
