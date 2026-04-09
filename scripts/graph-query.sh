@@ -74,6 +74,19 @@ SEARCH_RESP=$(curl -s -X POST "$BASE_URL/v1/search" \
   -H "$AUTH_HEADER" \
   -d "{\"query\": $(echo "$QUERY" | jq -R .), \"limit\": $LIMIT, \"user_id\": \"$USER_ID\"}")
 
+if ! echo "$SEARCH_RESP" | jq -e . > /dev/null 2>&1; then
+  echo "Error: search returned non-JSON:"
+  echo "$SEARCH_RESP"
+  exit 1
+fi
+
+if echo "$SEARCH_RESP" | jq -e '.detail' > /dev/null 2>&1; then
+  echo "API error: $(echo "$SEARCH_RESP" | jq -r '.detail')"
+  exit 1
+fi
+
+echo "Search response: $(echo "$SEARCH_RESP" | jq '{count, results: [.results[]? | {uuid, node_type, content: .content[0:60]}]}')"
+
 SEED_IDS=$(echo "$SEARCH_RESP" | jq -r '[.results[].uuid] | @json')
 
 if [ "$SEED_IDS" = "[]" ] || [ -z "$SEED_IDS" ]; then
