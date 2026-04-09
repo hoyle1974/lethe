@@ -45,9 +45,18 @@ fi
 "$PIP" install -r requirements-dev.txt -q
 "$PYTEST" tests/ -q
 
-echo -e "${YELLOW}Building and pushing container...${NC}"
-docker build --platform linux/amd64 -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+echo -e "${YELLOW}Authenticating Docker with Artifact Registry...${NC}"
+gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+echo -e "${YELLOW}Building container ($IMAGE_TAG)...${NC}"
+docker build --platform linux/amd64 --progress=plain \
+  -t "$IMAGE:$IMAGE_TAG" \
+  -t "$IMAGE:latest" \
+  .
+
+echo -e "${YELLOW}Pushing $IMAGE_TAG...${NC}"
 docker push "$IMAGE:$IMAGE_TAG"
+echo -e "${YELLOW}Pushing latest...${NC}"
 docker push "$IMAGE:latest"
 
 echo -e "${YELLOW}Deploying to Cloud Run...${NC}"
