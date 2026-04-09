@@ -1,9 +1,24 @@
 from __future__ import annotations
 import math
+import os
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from lethe.graph.search import cosine_similarity, rrf_fuse
+from lethe.graph.search import cosine_similarity, rrf_fuse, keyword_search, doc_to_node
 from lethe.models.node import Node
+
+
+def _config():
+    with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "test"}, clear=True):
+        from lethe.config import Config
+        return Config(_env_file=None)
+
+
+def _async_iter(items):
+    async def _gen():
+        for item in items:
+            yield item
+    return _gen()
 
 
 def _make_node(uid: str, weight: float = 0.5) -> Node:
@@ -76,3 +91,79 @@ def test_rrf_fuse_order_reflects_rank():
     b = _make_node("last")
     result = rrf_fuse([a, b], [])
     assert result[0].uuid == "first"
+
+
+# --- doc_to_node strips vector_distance field ---
+
+def test_doc_to_node_strips_vector_distance():
+    data = {
+        "node_type": "person",
+        "content": "Jack",
+        "domain": "entity",
+        "weight": 0.55,
+        "metadata": "{}",
+        "entity_links": [],
+        "user_id": "global",
+        "vector_distance": 0.12,   # must be stripped, not cause validation error
+    }
+    node = doc_to_node("abc123", data)
+    assert node.uuid == "abc123"
+    assert node.content == "Jack"
+
+
+# --- keyword_search excludes log nodes client-side ---
+
+@pytest.mark.asyncio
+async def test_keyword_search_excludes_log_nodes():
+    """log nodes must be filtered even without a server-side != filter."""
+    cfg = _config()
+
+    log_doc = MagicMock()
+    log_doc.id = "log-1"
+    log_doc.to_dict.return_value = {
+        "node_type": "log", "content": "jack logged in", "user_id": "global",
+        "domain": "general", "weight": 0.3, "metadata": "{}",
+        "entity_links": [], "journal_entry_ids": [],
+    }
+
+    entity_doc = MagicMock()
+    entity_doc.id = "entity-1"
+    entity_doc.to_dict.return_value = {
+        "node_type": "person", "content": "Jack", "user_id": "global",
+        "domain": "entity", "weight": 0.55, "metadata": "{}",
+        "entity_links": [], "journal_entry_ids": [],
+    }
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value \
+        .where.return_value \
+        .limit.return_value \
+        .stream = MagicMock(return_value=_async_iter([log_doc, entity_doc]))
+
+    results = await keyword_search(mock_db, cfg, "jack", [], None, "global", 10)
+    uuids = [n.uuid for n in results]
+    assert "entity-1" in uuids
+    assert "log-1" not in uuids
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_case_insensitive():
+    cfg = _config()
+
+    doc = MagicMock()
+    doc.id = "e1"
+    doc.to_dict.return_value = {
+        "node_type": "person", "content": "Gloria", "user_id": "global",
+        "domain": "entity", "weight": 0.55, "metadata": "{}",
+        "entity_links": [], "journal_entry_ids": [],
+    }
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value \
+        .where.return_value \
+        .limit.return_value \
+        .stream = MagicMock(return_value=_async_iter([doc]))
+
+    results = await keyword_search(mock_db, cfg, "gloria", [], None, "global", 10)
+    assert len(results) == 1
+    assert results[0].content == "Gloria"

@@ -44,7 +44,7 @@ def rrf_fuse(
 
 
 def doc_to_node(doc_id: str, data: dict) -> Node:
-    data.pop("__vector_distance__", None)
+    data.pop("vector_distance", None)
     embedding = None
     raw = data.get("embedding")
     if raw is not None:
@@ -84,13 +84,9 @@ async def vector_search(
 ) -> list[Node]:
     col = db.collection(config.lethe_collection)
 
-    # Build base query excluding log entries
-    filters = [
-        FieldFilter("user_id", "==", user_id),
-        FieldFilter("node_type", "!=", "log"),
-    ]
-    if node_types:
-        filters.append(FieldFilter("node_type", "in", node_types))
+    # Build base query — exclude log/filter by node_type client-side to avoid
+    # composite index requirements for != queries
+    filters = [FieldFilter("user_id", "==", user_id)]
     if domain:
         filters.append(FieldFilter("domain", "==", domain))
 
@@ -103,13 +99,18 @@ async def vector_search(
             vector_field="embedding",
             query_vector=Vector(query_vector),
             distance_measure=DistanceMeasure.COSINE,
-            limit=limit,
-            distance_result_field="__vector_distance__",
+            limit=limit * 2,  # fetch extra to account for client-side filtering
         )
         results: list[Node] = []
         async for doc in vq.stream():
             data = doc.to_dict() or {}
+            if data.get("node_type") == "log":
+                continue
+            if node_types and data.get("node_type") not in node_types:
+                continue
             results.append(doc_to_node(doc.id, data))
+            if len(results) >= limit:
+                break
         log.info("vector_search: %d results for user_id=%s", len(results), user_id)
         return results
     except Exception as e:
@@ -127,17 +128,19 @@ async def keyword_search(
     limit: int,
 ) -> list[Node]:
     col = db.collection(config.lethe_collection)
+    # Filter node_type != "log" client-side to avoid composite index on != operator
     q = (
         col
         .where(filter=FieldFilter("user_id", "==", user_id))
-        .where(filter=FieldFilter("node_type", "!=", "log"))
-        .limit(limit * 5)
+        .limit(limit * 10)
     )
     results: list[Node] = []
     kw_lower = keywords.lower()
     try:
         async for doc in q.stream():
             data = doc.to_dict() or {}
+            if data.get("node_type") == "log":
+                continue
             content = data.get("content", "").lower()
             if kw_lower not in content:
                 continue

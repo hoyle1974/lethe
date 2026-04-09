@@ -86,11 +86,11 @@ async def _find_nearest_by_type(
             query_vector=Vector(vector),
             distance_measure=DistanceMeasure.COSINE,
             limit=5,
-            distance_result_field="__vector_distance__",
+            distance_result_field="vector_distance",
         )
         async for doc in query.stream():
             data = doc.to_dict() or {}
-            dist = data.pop("__vector_distance__", 1.0)
+            dist = data.pop("vector_distance", 1.0)
             if data.get("node_type") != node_type:
                 continue
             if float(dist) <= threshold:
