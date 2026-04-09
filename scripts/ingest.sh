@@ -1,26 +1,28 @@
 #!/bin/bash
 #
 # Ingest text into the Lethe graph.
-# Usage: ./scripts/ingest.sh [instance] [-domain=X] [-user-id=X] [-source=X] <text>
+# Usage: ./scripts/ingest.sh [--instance=X] [-domain=X] [-user-id=X] [-source=X] <text>
 #
 # Examples:
 #   ./scripts/ingest.sh "Alice works at Acme Corp"
-#   ./scripts/ingest.sh staging "Bob lives in Paris"
+#   ./scripts/ingest.sh --instance=staging "Bob lives in Paris"
 #   ./scripts/ingest.sh -domain=work -user-id=jot "Alice started the new project today"
-#   ./scripts/ingest.sh staging -domain=personal "Went hiking this weekend"
+#   ./scripts/ingest.sh --instance=staging -domain=personal "Went hiking this weekend"
 #
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/env-confirm.sh"
 
-# First positional arg is optional instance name (not a flag, not the text)
-if [[ "${1:-}" != -* ]] && [[ -n "${1:-}" ]] && [[ "${1:-}" != *" "* ]]; then
-  require_env_and_confirm "$1"
-  shift
-else
-  require_env_and_confirm ""
-fi
+# Parse --instance= before confirm
+INSTANCE=""
+for arg in "$@"; do
+  case "$arg" in
+    --instance=*) INSTANCE="${arg#*=}" ;;
+  esac
+done
+
+require_env_and_confirm "$INSTANCE"
 
 if [ -f "$ENV_FILE" ]; then set -a; source "$ENV_FILE"; set +a; fi
 
@@ -36,10 +38,11 @@ TEXT=""
 
 for arg in "$@"; do
   case "$arg" in
-    -domain=*)   DOMAIN="${arg#*=}" ;;
-    -user-id=*)  USER_ID="${arg#*=}" ;;
-    -source=*)   SOURCE="${arg#*=}" ;;
-    *)           TEXT="$arg" ;;
+    --instance=*) ;;  # already handled
+    -domain=*)    DOMAIN="${arg#*=}" ;;
+    -user-id=*)   USER_ID="${arg#*=}" ;;
+    -source=*)    SOURCE="${arg#*=}" ;;
+    *)            TEXT="$arg" ;;
   esac
 done
 

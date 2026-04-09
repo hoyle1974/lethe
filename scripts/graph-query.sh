@@ -1,25 +1,27 @@
 #!/bin/bash
 #
 # Query the Lethe graph and render it in the terminal.
-# Usage: ./scripts/graph-query.sh <dev|prod> [-depth=N] [-limit=N] [-limit-per-edge=N] [-user-id=X] <query>
+# Usage: ./scripts/graph-query.sh [--instance=X] [-depth=N] [-limit=N] [-limit-per-edge=N] [-user-id=X] <query>
 #
 # Examples:
-#   ./scripts/graph-query.sh dev "Alice Acme"
-#   ./scripts/graph-query.sh dev -depth=3 -limit=5 "work projects"
-#   ./scripts/graph-query.sh prod -user-id=user_abc "engineering"
+#   ./scripts/graph-query.sh "Alice Acme"
+#   ./scripts/graph-query.sh --instance=staging "work projects"
+#   ./scripts/graph-query.sh -depth=3 -limit=5 -user-id=jot "engineering"
 #
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/env-confirm.sh"
 
-# First positional arg is optional instance name (not a flag)
-if [[ "${1:-}" != -* ]] && [[ -n "${1:-}" ]]; then
-  require_env_and_confirm "$1"
-  shift
-else
-  require_env_and_confirm ""
-fi
+# Parse --instance= before confirm (everything else parsed after)
+INSTANCE=""
+for arg in "$@"; do
+  case "$arg" in
+    --instance=*) INSTANCE="${arg#*=}" ;;
+  esac
+done
+
+require_env_and_confirm "$INSTANCE"
 
 if [ -f "$ENV_FILE" ]; then set -a; source "$ENV_FILE"; set +a; fi
 
@@ -27,7 +29,7 @@ PROJECT="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT in $ENV_FILE}"
 REGION="${LETHE_REGION:-us-central1}"
 SERVICE_NAME="lethe-api"
 
-# Parse flags
+# Parse remaining flags
 DEPTH=2
 LIMIT=10
 LIMIT_PER_EDGE=5
@@ -36,16 +38,17 @@ QUERY=""
 
 for arg in "$@"; do
   case "$arg" in
-    -depth=*)        DEPTH="${arg#*=}" ;;
-    -limit=*)        LIMIT="${arg#*=}" ;;
+    --instance=*)      ;;  # already handled
+    -depth=*)          DEPTH="${arg#*=}" ;;
+    -limit=*)          LIMIT="${arg#*=}" ;;
     -limit-per-edge=*) LIMIT_PER_EDGE="${arg#*=}" ;;
-    -user-id=*)      USER_ID="${arg#*=}" ;;
-    *)               QUERY="$arg" ;;
+    -user-id=*)        USER_ID="${arg#*=}" ;;
+    *)                 QUERY="$arg" ;;
   esac
 done
 
 if [ -z "$QUERY" ]; then
-  echo "Usage: $0 <dev|prod> [-depth=N] [-limit=N] [-limit-per-edge=N] [-user-id=X] <query>"
+  echo "Usage: $0 [--instance=X] [-depth=N] [-limit=N] [-limit-per-edge=N] [-user-id=X] <query>"
   exit 1
 fi
 
