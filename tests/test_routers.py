@@ -84,3 +84,15 @@ def test_get_node_types(mock_embedder, mock_llm):
     assert "node_types" in data
     assert "allowed_predicates" in data
     assert "generic" in data["node_types"]
+
+
+def test_delete_node_method_not_allowed(mock_embedder, mock_llm):
+    client = _make_test_client(mock_embedder, mock_llm)
+    resp = client.delete("/v1/nodes/some-uuid")
+    assert resp.status_code == 405
+
+
+def test_delete_entry_method_not_allowed(mock_embedder, mock_llm):
+    client = _make_test_client(mock_embedder, mock_llm)
+    resp = client.delete("/v1/entries/some-uuid")
+    assert resp.status_code == 405

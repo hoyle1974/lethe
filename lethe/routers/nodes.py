@@ -52,11 +52,3 @@ async def list_nodes(
     all_results.sort(key=lambda n: n.created_at or "", reverse=False)
     return all_results[offset: offset + limit]
 
-
-@router.delete("/v1/nodes/{uuid}", status_code=204)
-async def delete_node(
-    uuid: str,
-    db: firestore.AsyncClient = Depends(get_db),
-    config: Config = Depends(get_config),
-) -> None:
-    await db.collection(config.lethe_collection).document(uuid).delete()

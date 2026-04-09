@@ -53,11 +53,3 @@ async def list_entries(
     results.sort(key=lambda n: n.created_at or "", reverse=not ascending)
     return results[:limit]
 
-
-@router.delete("/v1/entries/{uuid}", status_code=204)
-async def delete_entry(
-    uuid: str,
-    db: firestore.AsyncClient = Depends(get_db),
-    config: Config = Depends(get_config),
-) -> None:
-    await db.collection(config.lethe_collection).document(uuid).delete()

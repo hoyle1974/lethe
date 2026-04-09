@@ -1,0 +1,18 @@
+---
+description: Require project virtualenv for all Python commands
+alwaysApply: true
+---
+
+# Python Virtual Environment Rule
+
+- Always run Python tooling through the project virtual environment.
+- Do not run `python`, `pip`, `pytest`, or project scripts with system Python.
+- Preferred commands:
+  - `.venv/bin/python`
+  - `.venv/bin/pip`
+  - `.venv/bin/pytest`
+
+Examples:
+- `./.venv/bin/python -m lethe.main`
+- `./.venv/bin/pip install -r requirements-dev.txt`
+- `./.venv/bin/pytest tests/ -q`

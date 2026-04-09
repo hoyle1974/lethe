@@ -1,0 +1,243 @@
+Lethe API Specification (LLM Integration Guide)
+
+Overview for AI Agents
+Lethe is a Memory-as-a-Service graph database for LLM applications. It ingests raw text, extracts structured SPO facts, deduplicates entities with stable SHA1-based IDs, and exposes graph-aware retrieval via semantic search plus bounded BFS traversal.
+
+Core architecture rules
+
+- Prefer `POST /v1/graph/summarize` for context injection. It returns a dense paragraph optimized for LLM prompts.
+- Contradictions are handled by ingesting new facts. Superseded relationships are tombstoned (`weight = 0.0`) and filtered from active retrieval.
+- Tenant isolation is per-node via `user_id` (default `"global"`). Always pass the correct `user_id`.
+- For Cloud Run deployments, use Bearer auth with a GCP identity token.
+
+Recommended LLM retrieval flow
+
+1) `POST /v1/search` to find seed node IDs.
+2) `POST /v1/graph/summarize` using those seed IDs for direct prompt context.
+3) Use `POST /v1/graph/expand` only when you need raw topology.
+
+Endpoint index
+
+- `GET /v1/health`
+- `GET /v1/node-types`
+- `POST /v1/ingest`
+- `POST /v1/search`
+- `POST /v1/graph/expand`
+- `POST /v1/graph/summarize`
+- `GET /v1/nodes/{uuid}`
+- `GET /v1/nodes`
+- `GET /v1/entries/{uuid}`
+- `GET /v1/entries`
+- `POST /v1/admin/backfill`
+- `POST /v1/admin/consolidate`
+
+Note: Delete routes are intentionally not exposed.
+
+1) Health (GET /v1/health)
+
+Response:
+```json
+{
+  "status": "ok"
+}
+```
+
+2) Canonical typing metadata (GET /v1/node-types)
+
+Use this to discover valid `node_types` and canonical predicates at runtime.
+
+Response:
+```json
+{
+  "node_types": ["person", "place", "event", "project", "goal", "preference", "asset", "tool", "generic", "relationship", "log"],
+  "allowed_predicates": ["works_at", "lives_in", "knows", "is_part_of", "owns", "uses", "participates_in", "located_at", "created_by", "manages", "reports_to", "related_to", "is_a"]
+}
+```
+
+3) Ingestion (POST /v1/ingest)
+
+Store raw text. Lethe creates/updates log, entity, and relationship nodes.
+
+Request body:
+```json
+{
+  "text": "Alice bought a Breville espresso machine today.",
+  "domain": "personal",
+  "source": "chat_ui",
+  "user_id": "user_123",
+  "timestamp": "2026-04-08T10:00:00Z"
+}
+```
+
+Field defaults:
+- `domain`: `"general"`
+- `user_id`: `"global"`
+- `timestamp`: server time (UTC)
+
+Response:
+```json
+{
+  "entry_uuid": "uuid",
+  "nodes_created": ["uuid"],
+  "nodes_updated": ["uuid"],
+  "relationships_created": ["uuid"]
+}
+```
+
+4) Semantic Search (POST /v1/search)
+
+Find retrieval seeds. Results apply significance, recency decay, reinforcement, and tombstone filtering.
+
+Request body:
+```json
+{
+  "query": "What kind of coffee maker does Alice have?",
+  "node_types": [],
+  "domain": "personal",
+  "user_id": "user_123",
+  "limit": 20,
+  "min_significance": 0.0
+}
+```
+
+Field defaults:
+- `node_types`: `[]` (all active non-log types)
+- `user_id`: `"global"`
+- `limit`: `20`
+- `min_significance`: `0.0`
+
+Response:
+```json
+{
+  "results": [
+    {
+      "uuid": "uuid",
+      "node_type": "asset",
+      "content": "Breville espresso machine",
+      "weight": 0.55
+    }
+  ],
+  "count": 1
+}
+```
+
+5) Graph expansion (POST /v1/graph/expand)
+
+Return raw bounded subgraph from seed nodes.
+
+Request body:
+```json
+{
+  "seed_ids": ["uuid1", "uuid2"],
+  "query": "What kind of coffee maker does Alice have?",
+  "hops": 2,
+  "limit_per_edge": 5,
+  "user_id": "user_123"
+}
+```
+
+Field defaults:
+- `query`: `null` (optional)
+- `hops`: `2`
+- `limit_per_edge`: `5`
+- `user_id`: `"global"`
+
+Response:
+```json
+{
+  "nodes": {
+    "uuid1": {},
+    "uuid2": {}
+  },
+  "edges": [
+    {
+      "subject": "uuid1",
+      "predicate": "owns",
+      "object": "uuid2"
+    }
+  ]
+}
+```
+
+6) Graph summarization (POST /v1/graph/summarize)
+
+Same request shape as `/v1/graph/expand`, but returns a single summary paragraph.
+
+Response:
+```json
+{
+  "summary": "Alice owns a Breville espresso machine and recently bought descaling powder for maintenance."
+}
+```
+
+7) Node reads
+
+`GET /v1/nodes/{uuid}` returns one node by ID.
+
+`GET /v1/nodes` supports:
+- `node_type` (optional)
+- `domain` (optional)
+- `user_id` (default `"global"`)
+- `limit` (default `20`, min `1`, max `500`)
+- `offset` (default `0`)
+
+8) Entry (log) reads
+
+`GET /v1/entries/{uuid}` returns one entry only if node type is `log`.
+
+`GET /v1/entries` supports:
+- `user_id` (default `"global"`)
+- `limit` (default `20`, min `1`, max `500`)
+- `ascending` (default `false`)
+- `since` (optional ISO-8601 string)
+
+9) Admin endpoints
+
+`POST /v1/admin/backfill`
+```json
+{
+  "limit": 100
+}
+```
+
+`POST /v1/admin/consolidate`
+```json
+{
+  "user_id": "user_123"
+}
+```
+
+Consolidate response:
+```json
+{
+  "statements": ["..."],
+  "ingest_results": []
+}
+```
+
+Standard Node object schema
+
+Returned by `/v1/search`, `/v1/graph/expand`, `/v1/nodes*`, and `/v1/entries*`.
+
+```json
+{
+  "uuid": "string",
+  "node_type": "string",
+  "content": "string",
+  "domain": "string",
+  "weight": 0.5,
+  "metadata": "{}",
+  "entity_links": ["uuid"],
+  "predicate": "string | null",
+  "object_uuid": "string | null",
+  "subject_uuid": "string | null",
+  "journal_entry_ids": ["uuid"],
+  "name_key": "string | null",
+  "hot_edges": ["uuid"],
+  "relevance_score": 1.0,
+  "user_id": "string",
+  "source": "string | null",
+  "created_at": "ISO-8601 datetime | null",
+  "updated_at": "ISO-8601 datetime | null"
+}
+```
