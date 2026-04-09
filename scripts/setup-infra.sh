@@ -80,3 +80,4 @@ fi
 echo ""
 echo -e "${GREEN}Infrastructure setup complete!${NC}"
 echo "Next: ./scripts/deploy.sh${ENV_TARGET:+ $ENV_TARGET}"
+echo "Then: ./scripts/setup-scheduler.sh${ENV_TARGET:+ $ENV_TARGET}"

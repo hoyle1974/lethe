@@ -11,8 +11,7 @@ require_env_and_confirm() {
   local instance_arg="${1:-}"
   local extra_usage="${2:-}"
 
-  local REPO_ROOT
-  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)"
+  local REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)}"
 
   if [ -z "$instance_arg" ]; then
     export ENV_TARGET="default"
@@ -23,6 +22,9 @@ require_env_and_confirm() {
   fi
 
   echo -e "\033[1;33mInstance: $ENV_TARGET  Config: $ENV_FILE\033[0m"
+  if [ "${LETHE_SKIP_CONFIRM:-0}" = "1" ]; then
+    return 0
+  fi
   read -r -p "Continue? [y/N] " confirm
   case "$confirm" in
     [yY][eE][sS]|[yY]) ;;

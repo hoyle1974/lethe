@@ -32,6 +32,14 @@ if ! command -v gcloud &>/dev/null; then
 fi
 gcloud config set project "$PROJECT" 2>/dev/null
 
+echo -e "${YELLOW}Applying Firestore indexes...${NC}"
+if ! command -v firebase &>/dev/null; then
+  echo -e "${RED}Error: firebase CLI not found. Install it to deploy firestore.indexes.json.${NC}"
+  exit 1
+fi
+firebase use "$PROJECT" --non-interactive >/dev/null 2>&1 || true
+firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive
+
 echo -e "${YELLOW}Running tests...${NC}"
 if [ -f "$REPO_ROOT/.venv/bin/pip" ]; then
   PYTHON="$REPO_ROOT/.venv/bin/python"

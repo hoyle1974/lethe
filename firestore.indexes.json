@@ -91,6 +91,16 @@
           "vectorConfig": { "dimension": 768, "flat": {} }
         }
       ]
+    },
+    {
+      "collectionGroup": "nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "subject_uuid", "order": "ASCENDING" },
+        { "fieldPath": "node_type", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

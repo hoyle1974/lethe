@@ -1,6 +1,6 @@
 from lethe.models.node import (
     Node, IngestRequest, IngestResponse,
-    SearchRequest, GraphExpandRequest, GraphExpandResponse, Edge,
+    SearchRequest, GraphExpandRequest, GraphExpandResponse, GraphSummarizeResponse, Edge,
 )
 
 
@@ -52,6 +52,11 @@ def test_graph_expand_response():
     )
     assert len(r.nodes) == 1
     assert len(r.edges) == 1
+
+
+def test_graph_summarize_response():
+    r = GraphSummarizeResponse(summary="One paragraph.")
+    assert r.summary == "One paragraph."
 
 
 def test_graph_expand_to_markdown():

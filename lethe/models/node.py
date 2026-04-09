@@ -86,3 +86,7 @@ class GraphExpandResponse(BaseModel):
             obj_label = obj.content[:40] if obj else edge.object[:8]
             lines.append(f"- {subj_label} --[{edge.predicate}]--> {obj_label}")
         return "\n".join(lines)
+
+
+class GraphSummarizeResponse(BaseModel):
+    summary: str

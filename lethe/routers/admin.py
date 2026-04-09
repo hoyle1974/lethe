@@ -5,10 +5,18 @@ from google.cloud import firestore
 from pydantic import BaseModel
 
 from lethe.config import Config
-from lethe.deps import get_canonical_map, get_config, get_db, get_embedder
+from lethe.deps import (
+    get_canonical_map,
+    get_config,
+    get_db,
+    get_embedder,
+    get_llm,
+)
 from lethe.graph.canonical_map import CanonicalMap
+from lethe.graph.consolidate import ConsolidationResponse, run_consolidation
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector
+from lethe.infra.llm import LLMDispatcher
 
 router = APIRouter()
 
@@ -28,6 +36,10 @@ async def node_types(canonical_map: CanonicalMap = Depends(get_canonical_map)):
 
 class BackfillRequest(BaseModel):
     limit: int = 100
+
+
+class ConsolidateRequest(BaseModel):
+    user_id: str = "global"
 
 
 @router.post("/v1/admin/backfill")
@@ -52,3 +64,22 @@ async def backfill(
         if count >= req.limit:
             break
     return {"backfilled": count}
+
+
+@router.post("/v1/admin/consolidate", response_model=ConsolidationResponse)
+async def consolidate(
+    req: ConsolidateRequest,
+    db: firestore.AsyncClient = Depends(get_db),
+    embedder: Embedder = Depends(get_embedder),
+    llm: LLMDispatcher = Depends(get_llm),
+    config: Config = Depends(get_config),
+    canonical_map: CanonicalMap = Depends(get_canonical_map),
+) -> ConsolidationResponse:
+    return await run_consolidation(
+        db=db,
+        embedder=embedder,
+        llm=llm,
+        config=config,
+        canonical_map=canonical_map,
+        user_id=req.user_id,
+    )

@@ -132,7 +132,7 @@ async def _process_triple(
         subject_id=subj_node.uuid, predicate=predicate, object_id=obj_node.uuid,
         source_entry_id=entry_uuid,
         subject_content=subj_node.content, object_content=obj_node.content,
-        timestamp=ts, user_id=user_id,
+        timestamp=ts, user_id=user_id, llm=llm,
     )
     if rel_id not in relationships_created:
         relationships_created.append(rel_id)

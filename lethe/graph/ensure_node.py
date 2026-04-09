@@ -1,19 +1,21 @@
 from __future__ import annotations
 import hashlib
+import logging
 import re
 import uuid as _uuid
 from datetime import datetime, timezone
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from google.cloud import firestore
 from lethe.infra.fs_helpers import Vector, DistanceMeasure, ArrayUnion, FieldFilter
 
 from lethe.config import Config
+from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
 from lethe.infra.embedder import Embedder
+from lethe.infra.llm import LLMDispatcher
 from lethe.models.node import Node
 
-if TYPE_CHECKING:
-    from lethe.infra.llm import LLMDispatcher
+log = logging.getLogger(__name__)
 
 
 def stable_entity_doc_id(node_type: str, name: str) -> str:
@@ -272,6 +274,7 @@ async def create_relationship_node(
     object_content: str,
     timestamp: str,
     user_id: str = "global",
+    llm: Optional[LLMDispatcher] = None,
 ) -> str:
     """Create or update a reified relationship node. Returns the relationship document ID."""
     predicate = normalized_predicate(predicate)
@@ -287,6 +290,29 @@ async def create_relationship_node(
     # inside a Firestore transactional function.
     content = f"{subject_content} {predicate} {object_content}".strip()
     vector = await embedder.embed(content, "RETRIEVAL_DOCUMENT")
+
+    superseded_id: Optional[str] = None
+    existing_facts: list[tuple[str, str]] = []
+    try:
+        rq = (
+            col.where(filter=FieldFilter("user_id", "==", user_id))
+            .where(filter=FieldFilter("subject_uuid", "==", subject_id))
+            .where(filter=FieldFilter("node_type", "==", "relationship"))
+            .order_by("updated_at", direction=firestore.Query.DESCENDING)
+            .limit(10)
+        )
+        async for doc in rq.stream():
+            if doc.id == rel_id:
+                continue
+            d = doc.to_dict() or {}
+            c = (d.get("content") or "").strip()
+            if c:
+                existing_facts.append((doc.id, c))
+    except Exception as e:
+        log.warning("create_relationship_node: existing rel query failed: %s", e)
+
+    if llm is not None and existing_facts:
+        superseded_id = await evaluate_relationship_supersedes(llm, content, existing_facts)
 
     create_data = {
         "node_type": "relationship",
@@ -318,4 +344,9 @@ async def create_relationship_node(
         transaction.set(ref, create_data)
         return rel_id
 
-    return await _txn_create_or_update(db.transaction())
+    rid = await _txn_create_or_update(db.transaction())
+    if superseded_id and superseded_id != rid:
+        candidate_ids = {u for u, _ in existing_facts}
+        if superseded_id in candidate_ids:
+            await tombstone_relationship(db, config.lethe_collection, superseded_id, rid)
+    return rid
