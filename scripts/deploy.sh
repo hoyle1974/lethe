@@ -33,8 +33,17 @@ fi
 gcloud config set project "$PROJECT" 2>/dev/null
 
 echo -e "${YELLOW}Running tests...${NC}"
-pip install -r requirements-dev.txt -q
-pytest tests/ -q
+if [ -f "$REPO_ROOT/.venv/bin/pip" ]; then
+  PYTHON="$REPO_ROOT/.venv/bin/python"
+  PIP="$REPO_ROOT/.venv/bin/pip"
+  PYTEST="$REPO_ROOT/.venv/bin/pytest"
+else
+  PYTHON=python3
+  PIP=pip
+  PYTEST=pytest
+fi
+"$PIP" install -r requirements-dev.txt -q
+"$PYTEST" tests/ -q
 
 echo -e "${YELLOW}Building and pushing container...${NC}"
 docker build --platform linux/amd64 -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
