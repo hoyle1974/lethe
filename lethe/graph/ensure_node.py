@@ -174,17 +174,8 @@ async def ensure_node(
     except Exception:
         pass
 
-    # Step 4: create new node
-    snap = await ref.get()
-    if snap.exists:
-        data = snap.to_dict() or {}
-        if source_entry_id:
-            await ref.update({
-                "journal_entry_ids": ArrayUnion([source_entry_id]),
-                "updated_at": ts,
-            })
-        return _doc_to_node(doc_id, data)
-
+    # Step 4: create new node in a Firestore transaction to prevent lost writes
+    # under concurrent ingestion of the same entity.
     node_data = {
         "node_type": node_type,
         "content": clean,
@@ -199,8 +190,22 @@ async def ensure_node(
         "created_at": ts,
         "updated_at": ts,
     }
-    await ref.set(node_data)
-    return _doc_to_node(doc_id, node_data)
+
+    @firestore.async_transactional
+    async def _txn_create_or_get(transaction: firestore.AsyncTransaction) -> Node:
+        snap = await ref.get(transaction=transaction)
+        if snap.exists:
+            data = snap.to_dict() or {}
+            if source_entry_id:
+                transaction.update(ref, {
+                    "journal_entry_ids": ArrayUnion([source_entry_id]),
+                    "updated_at": ts,
+                })
+            return _doc_to_node(doc_id, data)
+        transaction.set(ref, node_data)
+        return _doc_to_node(doc_id, node_data)
+
+    return await _txn_create_or_get(db.transaction())
 
 
 async def add_entity_link(
@@ -275,18 +280,12 @@ async def create_relationship_node(
     ref = col.document(rel_id)
     ts = timestamp or _now_iso()
 
-    snap = await ref.get()
-    if snap.exists:
-        updates: dict = {"updated_at": ts}
-        if source_entry_id:
-            updates["journal_entry_ids"] = ArrayUnion([source_entry_id])
-        await ref.update(updates)
-        return rel_id
-
+    # Pre-compute embedding before the transaction — async I/O is not allowed
+    # inside a Firestore transactional function.
     content = f"{subject_content} {predicate} {object_content}".strip()
     vector = await embedder.embed(content, "RETRIEVAL_DOCUMENT")
 
-    data = {
+    create_data = {
         "node_type": "relationship",
         "content": content,
         "predicate": predicate,
@@ -303,5 +302,17 @@ async def create_relationship_node(
         "created_at": ts,
         "updated_at": ts,
     }
-    await ref.set(data)
-    return rel_id
+
+    @firestore.async_transactional
+    async def _txn_create_or_update(transaction: firestore.AsyncTransaction) -> str:
+        snap = await ref.get(transaction=transaction)
+        if snap.exists:
+            updates: dict = {"updated_at": ts}
+            if source_entry_id:
+                updates["journal_entry_ids"] = ArrayUnion([source_entry_id])
+            transaction.update(ref, updates)
+            return rel_id
+        transaction.set(ref, create_data)
+        return rel_id
+
+    return await _txn_create_or_update(db.transaction())

@@ -1,7 +1,10 @@
 from __future__ import annotations
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 from google.cloud import firestore
 from lethe.infra.fs_helpers import Vector
@@ -50,6 +53,8 @@ async def run_ingest(
         "updated_at": ts,
     })
 
+    log.info("ingest: entry_uuid=%s text=%r", entry_uuid, text[:120])
+
     # Step 2: extract SPO triples
     status, triples = await extract_triples(
         llm=llm,
@@ -57,7 +62,12 @@ async def run_ingest(
         node_types=canonical_map.node_types,
         allowed_predicates=canonical_map.allowed_predicates,
     )
+    log.info("ingest: extraction status=%s triples=%d", status, len(triples))
+    for t in triples:
+        log.info("ingest: triple subject=%r predicate=%r object=%r",
+                 t.subject, t.canonical_predicate, t.object)
     if status == "none" or not triples:
+        log.warning("ingest: no triples extracted — entry_uuid=%s", entry_uuid)
         return IngestResponse(entry_uuid=entry_uuid)
 
     nodes_created: list[str] = []
@@ -74,9 +84,12 @@ async def run_ingest(
                 relationships_created=relationships_created,
                 canonical_map=canonical_map,
             )
-        except Exception:
+        except Exception as e:
+            log.error("ingest: _process_triple failed for %r: %s", triple, e, exc_info=True)
             continue
 
+    log.info("ingest: complete entry_uuid=%s nodes_created=%d nodes_updated=%d relationships=%d",
+             entry_uuid, len(nodes_created), len(nodes_updated), len(relationships_created))
     return IngestResponse(
         entry_uuid=entry_uuid,
         nodes_created=nodes_created,

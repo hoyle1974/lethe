@@ -1,7 +1,10 @@
 from __future__ import annotations
+import logging
 import os
 import re
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 from jinja2 import Environment, BaseLoader
 
@@ -116,9 +119,16 @@ async def extract_triples(
     owner_name: str = "",
 ) -> tuple[str, list[RefineryTriple]]:
     prompt = build_refinery_prompt(node_types, allowed_predicates, text, owner_name)
+    log.info("extraction: sending prompt to LLM (text=%r)", text[:120])
     raw = await llm.dispatch(LLMRequest(
         system_prompt=REFINERY_SYSTEM,
         user_prompt=prompt,
-        max_tokens=512,
+        max_tokens=2048,
     ))
-    return parse_refinery_output(raw)
+    log.info("extraction: raw LLM response:\n%s", raw)
+    status, triples = parse_refinery_output(raw)
+    log.info("extraction: parsed status=%r triples=%d", status, len(triples))
+    for t in triples:
+        log.info("extraction: triple %r | %r | %r (sub_type=%r obj_type=%r new=%s)",
+                 t.subject, t.predicate, t.object, t.subject_type, t.object_type, t.is_new_predicate)
+    return status, triples

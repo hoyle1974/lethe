@@ -18,13 +18,22 @@ Subject | Predicate | Object | SubjectType | ObjectType
    {{ node_types }}
 3. ONTOLOGY: Prefer predicates from this list:
    {{ allowed_predicates }}
-4. NEW PREDICATES: If a high-value relationship clearly does not fit any existing predicate,
-   prefix it with NEW: (e.g. NEW:mentors). Only for genuinely novel, reusable predicates.
-5. LIMIT: Maximum 5 high-confidence triples. If none exist, output: status: none
+4. NEW PREDICATES: If a relationship clearly does not fit any existing predicate,
+   prefix it with NEW: (e.g. NEW:mentors, NEW:has_child, NEW:owns_pet).
+5. EXTRACT ALL: Extract every distinct relationship in the text. Do not stop early.
+   Output up to 15 triples. If no relationships exist, output: status: none
 6. NO PRONOUNS: Never use I, me, my, we, us, you, your as Subject or Object.
 {% if owner_name %}
 7. OWNER: Replace any first-person pronoun referring to the user with "{{ owner_name }}".
 {% endif %}
+
+Example — for "Alice and Bob have a dog named Rex and a cat named Mittens":
+status: ok
+triples:
+Alice | NEW:has_pet | Rex | person | animal
+Bob | NEW:has_pet | Rex | person | animal
+Alice | NEW:has_pet | Mittens | person | animal
+Bob | NEW:has_pet | Mittens | person | animal
 
 Text:
 {{ text }}
