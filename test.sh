@@ -141,7 +141,6 @@ for i in "${!ENTRIES[@]}"; do
   echo "[$COUNT/100] Sending: $ENTRY"
   ingest "$ENTRY"
   
-  sleep 1
 done
 
 echo "-----------------------------------"
