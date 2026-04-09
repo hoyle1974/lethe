@@ -243,12 +243,14 @@ async def update_hot_edges(
             await col.document(object_node_id).update({"hot_edges": hot_edges})
             return
 
-        # Evict lowest relevance_score
+        # Evict lowest relevance_score — batch-fetch all edge docs in one round-trip
+        refs = [col.document(eid) for eid in hot_edges]
         scores: list[tuple[str, float]] = []
-        for eid in hot_edges:
-            snap = await col.document(eid).get()
+        id_to_score: dict[str, float] = {}
+        async for snap in db.get_all(refs):
             score = (snap.to_dict() or {}).get("relevance_score", 0.0) if snap.exists else 0.0
-            scores.append((eid, float(score)))
+            id_to_score[snap.id] = float(score)
+        scores = [(eid, id_to_score.get(eid, 0.0)) for eid in hot_edges]
 
         lowest_idx = min(range(len(scores)), key=lambda i: scores[i][1])
         hot_edges[lowest_idx] = new_rel_id
