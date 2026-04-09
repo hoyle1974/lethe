@@ -124,6 +124,8 @@ async def graph_expand(
 
     frontier = [n for n in seed_nodes.values() if n.node_type != "log"]
 
+    sem = asyncio.Semaphore(10)
+
     for _hop in range(hops):
         if not frontier:
             break
@@ -131,7 +133,7 @@ async def graph_expand(
         next_ids: set[str] = set()
 
         gather_tasks = [
-            _gather_neighbors(db, config, node, user_id)
+            _gather_neighbors(db, config, node, user_id, sem)
             for node in frontier
         ]
         neighbor_lists = await asyncio.gather(*gather_tasks)
@@ -181,9 +183,11 @@ async def _gather_neighbors(
     config: Config,
     node: Node,
     user_id: str,
+    sem: asyncio.Semaphore,
 ) -> tuple[list[str], list[str]]:
-    incoming, linking = await asyncio.gather(
-        _get_incoming_spo_edges(db, config, node.uuid, user_id),
-        _get_nodes_linking_to(db, config, node.uuid, user_id),
-    )
+    async with sem:
+        incoming, linking = await asyncio.gather(
+            _get_incoming_spo_edges(db, config, node.uuid, user_id),
+            _get_nodes_linking_to(db, config, node.uuid, user_id),
+        )
     return incoming, linking
