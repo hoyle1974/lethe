@@ -65,9 +65,9 @@ gcloud firestore indexes composite create \
   --collection-group=nodes \
   --query-scope=COLLECTION \
   --field-config=order=ASCENDING,field-path=user_id \
-  --field-config="vector-config={\"dimension\":\"768\",\"flat\":\"{}\"},field-path=embedding" \
+  --field-config='vector-config={"dimension":"768","flat": "{}"},field-path=embedding' \
   --quiet 2>/dev/null \
-  && echo -e "${GREEN}Vector index created (building in background)${NC}" \
+  && echo -e "${GREEN}Vector index created (building in background — may take a few minutes)${NC}" \
   || echo -e "${YELLOW}Vector index already exists or creation failed — check Firebase Console${NC}"
 
 echo -e "${CYAN}Deploying Firestore composite indexes...${NC}"
