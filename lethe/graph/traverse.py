@@ -156,12 +156,13 @@ async def graph_expand(
             break
 
         candidates = await _fetch_nodes_by_ids(db, config, list(next_ids))
-        # Never include log entries in the graph — mark them visited so we
-        # don't follow their links, but don't add them to all_nodes.
+        # Log entries: include in all_nodes as context but never put in the
+        # frontier — they don't lead to useful graph neighbours.
         non_log = [n for n in candidates.values() if n.node_type != "log"]
         for n in candidates.values():
             if n.node_type == "log":
                 visited.add(n.uuid)
+                all_nodes[n.uuid] = n  # keep as journal context in response
 
         pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)
 

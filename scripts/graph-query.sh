@@ -106,14 +106,14 @@ EXPAND_RESP=$(curl -s -X POST "$BASE_URL/v1/graph/expand" \
 DOT_FILE="/tmp/lethe-graph-query.dot"
 PNG_FILE="/tmp/lethe-graph-query.png"
 
-# Generate DOT from response
+# Generate DOT from response — exclude log nodes from visual graph
 echo "$EXPAND_RESP" | jq -r '
   "digraph lethe {",
   "  rankdir=LR;",
   "  node [shape=box fontname=Helvetica fontsize=10];",
   "  edge [fontname=Helvetica fontsize=9];",
   (
-    .nodes | to_entries[] |
+    .nodes | to_entries[] | select(.value.node_type != "log") |
     "  \"" + .key + "\" [label=\"" +
       (.value.node_type | ascii_downcase) + "\n" +
       (.value.content | .[0:40] | gsub("\""; "'"'"'")) +
@@ -133,14 +133,14 @@ if [ -s "$DOT_FILE" ] && command -v dot &>/dev/null && command -v imgcat &>/dev/
   dot -Tpng "$DOT_FILE" -o "$PNG_FILE" 2>/dev/null
   imgcat --width "$(tput cols)" "$PNG_FILE"
   echo "(graph saved to $PNG_FILE)"
-else
-  echo "=== Nodes ==="
-  echo "$EXPAND_RESP" | jq -r '.nodes | to_entries[] | "[\(.value.node_type)] \(.value.content | .[0:80])"'
-  echo ""
-  echo "=== Edges ==="
-  echo "$EXPAND_RESP" | jq -r '.edges[] | "\(.subject[0:8]) --[\(.predicate)]--> \(.object[0:8])"'
-  if ! command -v dot &>/dev/null; then
-    echo ""
-    echo "(Install graphviz and imgcat for visual rendering)"
-  fi
 fi
+
+# Always print text summary
+echo "=== Nodes ==="
+echo "$EXPAND_RESP" | jq -r '.nodes | to_entries[] | select(.value.node_type != "log") | "[\(.value.node_type)] \(.value.content | .[0:80])"'
+echo ""
+echo "=== Edges ==="
+echo "$EXPAND_RESP" | jq -r '.edges[] | "\(.subject[0:8]) --[\(.predicate)]--> \(.object[0:8])"'
+echo ""
+echo "=== Journal Entries ==="
+echo "$EXPAND_RESP" | jq -r '.nodes | to_entries[] | select(.value.node_type == "log") | "  \(.value.content | .[0:120])"'
