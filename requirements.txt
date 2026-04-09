@@ -4,4 +4,5 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0
 google-cloud-firestore>=2.19.0
 google-cloud-aiplatform>=1.60.0
+google-genai
 jinja2>=3.1.0
