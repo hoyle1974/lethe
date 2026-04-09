@@ -12,7 +12,6 @@ def test_config_defaults():
         assert cfg.lethe_embedding_model == "text-embedding-005"
         assert cfg.lethe_llm_model == "gemini-2.5-flash"
         assert cfg.lethe_collision_detection is True
-        assert cfg.lethe_rrf_k == 60
         assert cfg.lethe_similarity_threshold == 0.25
         assert cfg.lethe_entity_threshold == 0.15
         assert cfg.lethe_region == "us-central1"

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import asyncio
 import logging
 import math
 from typing import Optional
@@ -21,26 +20,6 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if mag_a == 0.0 or mag_b == 0.0:
         return 0.0
     return dot / (mag_a * mag_b)
-
-
-def rrf_fuse(
-    vector_results: list[Node],
-    keyword_results: list[Node],
-    k: int = 60,
-) -> list[Node]:
-    scores: dict[str, float] = {}
-    by_uuid: dict[str, Node] = {}
-
-    for rank, node in enumerate(vector_results):
-        scores[node.uuid] = scores.get(node.uuid, 0.0) + 1.0 / (k + rank + 1)
-        by_uuid[node.uuid] = node
-
-    for rank, node in enumerate(keyword_results):
-        scores[node.uuid] = scores.get(node.uuid, 0.0) + 1.0 / (k + rank + 1)
-        by_uuid[node.uuid] = node
-
-    ranked = sorted(scores.keys(), key=lambda uid: scores[uid], reverse=True)
-    return [by_uuid[uid] for uid in ranked]
 
 
 def doc_to_node(doc_id: str, data: dict) -> Node:
@@ -84,9 +63,11 @@ async def vector_search(
 ) -> list[Node]:
     col = db.collection(config.lethe_collection)
 
-    # Build base query — exclude log/filter by node_type client-side to avoid
-    # composite index requirements for != queries
     filters = [FieldFilter("user_id", "==", user_id)]
+    if node_types:
+        filters.append(FieldFilter("node_type", "in", node_types))
+    else:
+        filters.append(FieldFilter("node_type", "!=", "log"))
     if domain:
         filters.append(FieldFilter("domain", "==", domain))
 
@@ -99,18 +80,12 @@ async def vector_search(
             vector_field="embedding",
             query_vector=Vector(query_vector),
             distance_measure=DistanceMeasure.COSINE,
-            limit=limit * 2,  # fetch extra to account for client-side filtering
+            limit=limit,
         )
         results: list[Node] = []
         async for doc in vq.stream():
             data = doc.to_dict() or {}
-            if data.get("node_type") == "log":
-                continue
-            if node_types and data.get("node_type") not in node_types:
-                continue
             results.append(doc_to_node(doc.id, data))
-            if len(results) >= limit:
-                break
         log.info("vector_search: %d results for user_id=%s", len(results), user_id)
         return results
     except Exception as e:
@@ -118,46 +93,7 @@ async def vector_search(
         return []
 
 
-async def keyword_search(
-    db: firestore.AsyncClient,
-    config: Config,
-    keywords: str,
-    node_types: list[str],
-    domain: Optional[str],
-    user_id: str,
-    limit: int,
-) -> list[Node]:
-    col = db.collection(config.lethe_collection)
-    # Filter node_type != "log" client-side to avoid composite index on != operator
-    q = (
-        col
-        .where(filter=FieldFilter("user_id", "==", user_id))
-        .limit(limit * 10)
-    )
-    results: list[Node] = []
-    kw_lower = keywords.lower()
-    try:
-        async for doc in q.stream():
-            data = doc.to_dict() or {}
-            if data.get("node_type") == "log":
-                continue
-            content = data.get("content", "").lower()
-            if kw_lower not in content:
-                continue
-            if node_types and data.get("node_type") not in node_types:
-                continue
-            if domain and data.get("domain") != domain:
-                continue
-            results.append(doc_to_node(doc.id, data))
-            if len(results) >= limit:
-                break
-    except Exception as e:
-        log.warning("keyword_search failed: %s", e)
-    log.info("keyword_search: %d results for user_id=%s query=%r", len(results), user_id, keywords)
-    return results
-
-
-async def hybrid_search(
+async def execute_search(
     db: firestore.AsyncClient,
     embedder: Embedder,
     config: Config,
@@ -169,14 +105,9 @@ async def hybrid_search(
     min_significance: float,
 ) -> list[Node]:
     query_vector = await embedder.embed(query, "RETRIEVAL_QUERY")
-    vec_results, kw_results = await asyncio.gather(
-        vector_search(db, config, query_vector, node_types, domain, user_id, limit),
-        keyword_search(db, config, query, node_types, domain, user_id, limit),
-    )
-    fused = rrf_fuse(vec_results, kw_results, k=config.lethe_rrf_k)
+    results = await vector_search(db, config, query_vector, node_types, domain, user_id, limit)
     if min_significance > 0.0:
-        fused = [n for n in fused if n.weight >= min_significance]
-    result = fused[:limit]
-    log.info("hybrid_search: query=%r vec=%d kw=%d fused=%d returned=%d",
-             query, len(vec_results), len(kw_results), len(fused), len(result))
+        results = [n for n in results if n.weight >= min_significance]
+    result = results[:limit]
+    log.info("execute_search: query=%r vec=%d returned=%d", query, len(results), len(result))
     return result

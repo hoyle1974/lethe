@@ -5,7 +5,7 @@ from google.cloud import firestore
 
 from lethe.config import Config
 from lethe.deps import get_config, get_db, get_embedder
-from lethe.graph.search import hybrid_search
+from lethe.graph.search import execute_search
 from lethe.infra.embedder import Embedder
 from lethe.models.node import SearchRequest, SearchResponse
 
@@ -19,7 +19,7 @@ async def search(
     embedder: Embedder = Depends(get_embedder),
     config: Config = Depends(get_config),
 ) -> SearchResponse:
-    nodes = await hybrid_search(
+    nodes = await execute_search(
         db=db,
         embedder=embedder,
         config=config,
