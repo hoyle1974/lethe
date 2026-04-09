@@ -7,6 +7,7 @@ from lethe.infra.gemini import GeminiEmbedder, GeminiLLM
 from lethe.graph.canonical_map import seed_canonical_map, load_canonical_map
 from lethe.routers import admin
 from lethe.routers import ingest as ingest_router
+from lethe.routers import search as search_router
 
 
 @asynccontextmanager
@@ -25,3 +26,4 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Lethe", lifespan=lifespan)
 app.include_router(admin.router)
 app.include_router(ingest_router.router)
+app.include_router(search_router.router)
