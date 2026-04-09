@@ -46,7 +46,7 @@ SERVICE_NAME="lethe-api"
 # Parse remaining flags
 DEPTH=2
 LIMIT=10
-LIMIT_PER_EDGE=5
+LIMIT_PER_EDGE=20
 USER_ID="global"
 QUERY_PARTS=()
 

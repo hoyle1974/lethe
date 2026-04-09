@@ -41,7 +41,8 @@ def test_graph_expand_request_defaults():
     req = GraphExpandRequest(seed_ids=["uuid1"])
     assert req.user_id == "global"
     assert req.hops == 2
-    assert req.limit_per_edge == 5
+    assert req.limit_per_edge == 20
+    assert req.debug is True
     assert req.query is None
 
 
@@ -57,6 +58,7 @@ def test_graph_expand_response():
 def test_graph_summarize_response():
     r = GraphSummarizeResponse(summary="One paragraph.")
     assert r.summary == "One paragraph."
+    assert r.debug_reasoning is None
 
 
 def test_graph_expand_to_markdown():
@@ -71,3 +73,34 @@ def test_graph_expand_to_markdown():
     assert "Alice" in md
     assert "works_at" in md
     assert "[SEED]" in md
+
+
+def test_graph_expand_to_markdown_includes_metadata_and_recent_log_snippet():
+    r = GraphExpandResponse(
+        nodes={
+            "entity": Node(
+                uuid="entity",
+                node_type="person",
+                content="Alice",
+                metadata='{"role":"engineer"}',
+                journal_entry_ids=["log-old", "log-new"],
+            ),
+            "log-old": Node(
+                uuid="log-old",
+                node_type="log",
+                content="Old note",
+            ),
+            "log-new": Node(
+                uuid="log-new",
+                node_type="log",
+                content="Recent note " + ("x" * 200),
+            ),
+        },
+        edges=[],
+    )
+    md = r.to_markdown(seed_ids=["entity"])
+    assert 'metadata={"role":"engineer"}' in md
+    assert "Source Snippet: Recent note " in md
+    source_line = next(line for line in md.splitlines() if "Source Snippet:" in line)
+    snippet = source_line.split("Source Snippet: ", 1)[1]
+    assert len(snippet) <= 150
