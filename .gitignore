@@ -7,5 +7,6 @@ venv/
 *.egg-info/
 dist/
 .env
-.env.prod
+.env.*
+!.env.example
 *.credentials.json

@@ -12,8 +12,14 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/env-confirm.sh"
-require_env_and_confirm "$1"
-shift
+
+# First positional arg is optional instance name (not a flag)
+if [[ "${1:-}" != -* ]] && [[ -n "${1:-}" ]]; then
+  require_env_and_confirm "$1"
+  shift
+else
+  require_env_and_confirm ""
+fi
 
 if [ -f "$ENV_FILE" ]; then set -a; source "$ENV_FILE"; set +a; fi
 

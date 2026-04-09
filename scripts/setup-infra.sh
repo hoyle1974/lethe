@@ -7,7 +7,7 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/env-confirm.sh"
-require_env_and_confirm "$1"
+require_env_and_confirm "${1:-}"
 
 if [ -f "$ENV_FILE" ]; then
   set -a; source "$ENV_FILE"; set +a
@@ -69,4 +69,4 @@ fi
 
 echo ""
 echo -e "${GREEN}Infrastructure setup complete!${NC}"
-echo "Next: ./scripts/deploy.sh $ENV_TARGET"
+echo "Next: ./scripts/deploy.sh${ENV_TARGET:+ $ENV_TARGET}"
