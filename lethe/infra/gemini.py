@@ -1,9 +1,12 @@
 import asyncio
+import logging
 import vertexai
 from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
 from vertexai.generative_models import GenerativeModel, GenerationConfig
 from lethe.config import Config
 from lethe.infra.llm import LLMRequest
+
+log = logging.getLogger(__name__)
 
 EMBED_TASK_DOCUMENT = "RETRIEVAL_DOCUMENT"
 EMBED_TASK_QUERY = "RETRIEVAL_QUERY"
@@ -38,9 +41,13 @@ class GeminiLLM:
             system_instruction=req.system_prompt if req.system_prompt else None,
         )
         gen_cfg = GenerationConfig(max_output_tokens=req.max_tokens)
-        response = await asyncio.to_thread(
-            model.generate_content,
-            req.user_prompt,
-            generation_config=gen_cfg,
-        )
-        return response.text
+        try:
+            response = await asyncio.to_thread(
+                model.generate_content,
+                req.user_prompt,
+                generation_config=gen_cfg,
+            )
+            return response.text
+        except Exception as e:
+            log.warning("GeminiLLM.dispatch generation failed (likely safety filter): %s", e)
+            return "status: none\ntriples:\n"

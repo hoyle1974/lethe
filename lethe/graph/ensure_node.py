@@ -138,6 +138,7 @@ async def ensure_node(
                 new_vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
                 await collection.document(nearest.uuid).update({
                     "content": clean,
+                    "name_key": clean.lower(),
                     "embedding": Vector(new_vector),
                     "updated_at": _now_iso(),
                 })

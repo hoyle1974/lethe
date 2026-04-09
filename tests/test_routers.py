@@ -71,7 +71,12 @@ def test_get_node_not_found(mock_embedder, mock_llm):
 
 
 def test_get_node_types(mock_embedder, mock_llm):
+    mock_doc_snap = MagicMock()
+    mock_doc_snap.exists = False
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=mock_doc_snap)
     mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
     resp = client.get("/v1/node-types")
     assert resp.status_code == 200
