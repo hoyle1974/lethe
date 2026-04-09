@@ -113,7 +113,7 @@ echo "$EXPAND_RESP" | jq -r '
   "  node [shape=box fontname=Helvetica fontsize=10];",
   "  edge [fontname=Helvetica fontsize=9];",
   (
-    .nodes | to_entries[] | select(.value.node_type != "log") |
+    .nodes | to_entries[] | select(.value.node_type != "log" and .value.node_type != "relationship") |
     "  \"" + .key + "\" [label=\"" +
       (.value.node_type | ascii_downcase) + "\n" +
       (.value.content | .[0:40] | gsub("\""; "'"'"'")) +
@@ -137,7 +137,7 @@ fi
 
 # Always print text summary
 echo "=== Nodes ==="
-echo "$EXPAND_RESP" | jq -r '.nodes | to_entries[] | select(.value.node_type != "log") | "[\(.value.node_type)] \(.value.content | .[0:80])"'
+echo "$EXPAND_RESP" | jq -r '.nodes | to_entries[] | select(.value.node_type != "log" and .value.node_type != "relationship") | "[\(.value.node_type)] \(.value.content | .[0:80])"'
 echo ""
 echo "=== Edges ==="
 echo "$EXPAND_RESP" | jq -r '.edges[] | "\(.subject[0:8]) --[\(.predicate)]--> \(.object[0:8])"'
