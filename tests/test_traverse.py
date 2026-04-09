@@ -3,7 +3,7 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from lethe.graph.traverse import prune_frontier_by_similarity, _fetch_nodes_by_ids
+from lethe.graph.traverse import _is_alive, prune_frontier_by_similarity, _fetch_nodes_by_ids
 from lethe.models.node import Node
 
 
@@ -37,6 +37,11 @@ def test_prune_frontier_no_query_applies_hard_cap():
     nodes = [_node(str(i), [float(i), 0.0]) for i in range(10)]
     pruned = prune_frontier_by_similarity(nodes, None, top_k=3)
     assert len(pruned) == 3
+
+
+def test_is_alive_excludes_tombstones():
+    assert not _is_alive(Node(uuid="t", node_type="relationship", content="x", weight=0.0))
+    assert _is_alive(Node(uuid="a", node_type="relationship", content="x", weight=0.01))
 
 
 def test_prune_frontier_fewer_than_k():

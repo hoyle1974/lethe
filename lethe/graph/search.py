@@ -186,7 +186,7 @@ async def execute_search(
         for node, raw_distance in scored
     ]
     decorated.sort(key=lambda x: x[1])
-    ordered = [n for n, _ in decorated]
+    ordered = [n for n, _ in decorated if n.weight > 0.0]
     if min_significance > 0.0:
         ordered = [n for n in ordered if n.weight >= min_significance]
     result = ordered[:limit]

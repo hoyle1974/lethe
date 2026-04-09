@@ -15,6 +15,11 @@ from lethe.models.node import Node, Edge, GraphExpandResponse
 _BATCH_SIZE = 100
 
 
+def _is_alive(n: Node) -> bool:
+    """False for tombstoned nodes (weight 0.0); True otherwise."""
+    return n.weight > 0.0
+
+
 def prune_frontier_by_similarity(
     nodes: list[Node],
     query_vector: Optional[list[float]],
@@ -119,10 +124,10 @@ async def graph_expand(
     seed_nodes = await _fetch_nodes_by_ids(db, config, seed_ids)
     visited.update(seed_ids)
     for node in seed_nodes.values():
-        if node.node_type != "log":
+        if node.node_type != "log" and _is_alive(node):
             all_nodes[node.uuid] = node
 
-    frontier = [n for n in seed_nodes.values() if n.node_type != "log"]
+    frontier = [n for n in seed_nodes.values() if n.node_type != "log" and _is_alive(n)]
 
     sem = asyncio.Semaphore(10)
 
@@ -147,7 +152,12 @@ async def graph_expand(
             candidate_ids -= visited
             next_ids.update(candidate_ids)
 
-            if node.node_type == "relationship" and node.subject_uuid and node.object_uuid:
+            if (
+                node.node_type == "relationship"
+                and node.subject_uuid
+                and node.object_uuid
+                and _is_alive(node)
+            ):
                 all_edges.append(Edge(
                     subject=node.subject_uuid,
                     predicate=node.predicate or "related_to",
@@ -160,11 +170,16 @@ async def graph_expand(
         candidates = await _fetch_nodes_by_ids(db, config, list(next_ids))
         # Log entries: include in all_nodes as context but never put in the
         # frontier — they don't lead to useful graph neighbours.
-        non_log = [n for n in candidates.values() if n.node_type != "log"]
+        # Tombstones (weight 0): mark visited so we do not keep re-fetching them.
         for n in candidates.values():
+            if not _is_alive(n):
+                visited.add(n.uuid)
+                continue
             if n.node_type == "log":
                 visited.add(n.uuid)
                 all_nodes[n.uuid] = n  # keep as journal context in response
+
+        non_log = [n for n in candidates.values() if n.node_type != "log" and _is_alive(n)]
 
         pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)
 

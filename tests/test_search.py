@@ -93,6 +93,22 @@ def test_effective_distance_decay_older_log_ranks_worse():
     assert effective_distance_decay(old, raw, now) > effective_distance_decay(fresh, raw, now)
 
 
+def test_execute_search_ordering_excludes_tombstone_weight():
+    """Ghost-edge fix: tombstoned nodes have weight 0.0 and must not appear in results."""
+    from lethe.graph.search import effective_distance_decay
+
+    now = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    dead = Node(uuid="d", node_type="log", content="", weight=0.0, updated_at=now)
+    alive = Node(uuid="a", node_type="log", content="", weight=0.3, updated_at=now)
+    decorated = [
+        (dead, effective_distance_decay(dead, 0.1, now)),
+        (alive, effective_distance_decay(alive, 0.5, now)),
+    ]
+    decorated.sort(key=lambda x: x[1])
+    ordered = [n for n, _ in decorated if n.weight > 0.0]
+    assert [n.uuid for n in ordered] == ["a"]
+
+
 def test_effective_distance_reinforcement_reduces_effective_distance():
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     base = Node(
