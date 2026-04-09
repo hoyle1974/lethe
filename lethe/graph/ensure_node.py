@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 
 from google.cloud import firestore
+from lethe.infra.fs_helpers import Vector, DistanceMeasure, ArrayUnion, FieldFilter
 
 from lethe.config import Config
 from lethe.infra.embedder import Embedder
@@ -82,8 +83,8 @@ async def _find_nearest_by_type(
     try:
         query = collection.find_nearest(
             vector_field="embedding",
-            query_vector=firestore.Vector(vector),
-            distance_measure=firestore.DistanceMeasure.COSINE,
+            query_vector=Vector(vector),
+            distance_measure=DistanceMeasure.COSINE,
             limit=5,
             distance_result_field="__vector_distance__",
         )
@@ -137,12 +138,12 @@ async def ensure_node(
                 new_vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
                 await collection.document(nearest.uuid).update({
                     "content": clean,
-                    "embedding": firestore.Vector(new_vector),
+                    "embedding": Vector(new_vector),
                     "updated_at": _now_iso(),
                 })
         if source_entry_id:
             await collection.document(nearest.uuid).update({
-                "journal_entry_ids": firestore.ArrayUnion([source_entry_id]),
+                "journal_entry_ids": ArrayUnion([source_entry_id]),
                 "updated_at": _now_iso(),
             })
         return nearest
@@ -158,15 +159,15 @@ async def ensure_node(
     try:
         existing_query = (
             collection
-            .where(filter=firestore.FieldFilter("name_key", "==", name_key))
-            .where(filter=firestore.FieldFilter("node_type", "==", node_type))
+            .where(filter=FieldFilter("name_key", "==", name_key))
+            .where(filter=FieldFilter("node_type", "==", node_type))
             .limit(1)
         )
         async for existing_doc in existing_query.stream():
             existing_data = existing_doc.to_dict() or {}
             if source_entry_id:
                 await collection.document(existing_doc.id).update({
-                    "journal_entry_ids": firestore.ArrayUnion([source_entry_id]),
+                    "journal_entry_ids": ArrayUnion([source_entry_id]),
                     "updated_at": ts,
                 })
             return _doc_to_node(existing_doc.id, existing_data)
@@ -179,7 +180,7 @@ async def ensure_node(
         data = snap.to_dict() or {}
         if source_entry_id:
             await ref.update({
-                "journal_entry_ids": firestore.ArrayUnion([source_entry_id]),
+                "journal_entry_ids": ArrayUnion([source_entry_id]),
                 "updated_at": ts,
             })
         return _doc_to_node(doc_id, data)
@@ -193,7 +194,7 @@ async def ensure_node(
         "metadata": "{}",
         "entity_links": [],
         "journal_entry_ids": [source_entry_id] if source_entry_id else [],
-        "embedding": firestore.Vector(vector),
+        "embedding": Vector(vector),
         "user_id": user_id,
         "created_at": ts,
         "updated_at": ts,
@@ -209,7 +210,7 @@ async def add_entity_link(
     link_uuid: str,
 ) -> None:
     ref = db.collection(config.lethe_collection).document(node_uuid)
-    await ref.update({"entity_links": firestore.ArrayUnion([link_uuid])})
+    await ref.update({"entity_links": ArrayUnion([link_uuid])})
 
 
 async def update_hot_edges(
@@ -278,7 +279,7 @@ async def create_relationship_node(
     if snap.exists:
         updates: dict = {"updated_at": ts}
         if source_entry_id:
-            updates["journal_entry_ids"] = firestore.ArrayUnion([source_entry_id])
+            updates["journal_entry_ids"] = ArrayUnion([source_entry_id])
         await ref.update(updates)
         return rel_id
 
@@ -296,7 +297,7 @@ async def create_relationship_node(
         "domain": "relationship",
         "weight": 0.8,
         "metadata": "{}",
-        "embedding": firestore.Vector(vector),
+        "embedding": Vector(vector),
         "relevance_score": 1.0,
         "user_id": user_id,
         "created_at": ts,

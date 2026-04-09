@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from google.cloud import firestore
+from lethe.infra.fs_helpers import ArrayUnion
 
 CONFIG_COLLECTION = "_config"
 CANONICAL_MAP_DOC = "canonical_map"
@@ -46,4 +47,4 @@ async def seed_canonical_map(db: firestore.AsyncClient) -> None:
 
 async def append_predicate(db: firestore.AsyncClient, predicate: str) -> None:
     ref = db.collection(CONFIG_COLLECTION).document(CANONICAL_MAP_DOC)
-    await ref.update({"allowed_predicates": firestore.ArrayUnion([predicate])})
+    await ref.update({"allowed_predicates": ArrayUnion([predicate])})
