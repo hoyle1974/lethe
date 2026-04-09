@@ -51,7 +51,8 @@ class SearchRequest(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    nodes: list[Node]
+    results: list[Node]
+    count: int = 0
 
 
 class Edge(BaseModel):
