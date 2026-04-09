@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,7 +8,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from google.cloud import firestore
-from lethe.infra.fs_helpers import Vector
+from lethe.infra.fs_helpers import Vector, ArrayUnion
 
 from lethe.config import Config
 from lethe.graph.canonical_map import CanonicalMap, append_predicate
@@ -18,7 +19,22 @@ from lethe.graph.ensure_node import (
 from lethe.graph.extraction import extract_triples, RefineryTriple
 from lethe.infra.embedder import Embedder
 from lethe.infra.llm import LLMDispatcher
-from lethe.models.node import IngestResponse
+from lethe.models.node import IngestResponse, Node
+
+_GENERATED_ID_RE = re.compile(r"^(?:entity|rel)_[0-9a-f]{40}$", re.IGNORECASE)
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_PLACEHOLDER_TERMS = {
+    "generic",
+    "unknown",
+    "none",
+    "null",
+    "n/a",
+    "na",
+    "unspecified",
+}
 
 
 async def run_ingest(
@@ -73,23 +89,32 @@ async def run_ingest(
     nodes_created: list[str] = []
     nodes_updated: list[str] = []
     relationships_created: list[str] = []
+    rejection_counts = {
+        "unresolved_internal_id_or_placeholder": 0,
+        "triple_processing_error": 0,
+    }
 
     # Step 3: resolve and commit each triple
     for triple in triples:
         try:
-            await _process_triple(
+            outcome = await _process_triple(
                 db=db, embedder=embedder, llm=llm, config=config,
                 triple=triple, entry_uuid=entry_uuid, ts=ts, user_id=user_id,
                 nodes_created=nodes_created, nodes_updated=nodes_updated,
                 relationships_created=relationships_created,
                 canonical_map=canonical_map,
             )
+            if outcome and outcome in rejection_counts:
+                rejection_counts[outcome] += 1
         except Exception as e:
             log.error("ingest: _process_triple failed for %r: %s", triple, e, exc_info=True)
+            rejection_counts["triple_processing_error"] += 1
             continue
 
     log.info("ingest: complete entry_uuid=%s nodes_created=%d nodes_updated=%d relationships=%d",
              entry_uuid, len(nodes_created), len(nodes_updated), len(relationships_created))
+    if any(v > 0 for v in rejection_counts.values()):
+        log.info("ingest: triple rejection summary entry_uuid=%s counts=%s", entry_uuid, rejection_counts)
     return IngestResponse(
         entry_uuid=entry_uuid,
         nodes_created=nodes_created,
@@ -110,18 +135,39 @@ async def _process_triple(
         if predicate not in canonical_map.allowed_predicates:
             canonical_map.allowed_predicates.append(predicate)
 
-    subj_exists = await _node_exists(db, config, triple.subject_type, triple.subject)
-    subj_node = await ensure_node(
-        db=db, embedder=embedder, config=config,
-        identifier=triple.subject, node_type=triple.subject_type,
-        source_entry_id=entry_uuid, timestamp=ts, user_id=user_id, llm=llm,
-    )
+    subj_resolved = await _resolve_term(db, config, triple.subject, triple.subject_type)
+    obj_resolved = await _resolve_term(db, config, triple.object, triple.object_type)
 
-    obj_exists = await _node_exists(db, config, triple.object_type, triple.object)
-    obj_node = await ensure_node(
-        db=db, embedder=embedder, config=config,
-        identifier=triple.object, node_type=triple.object_type,
-        source_entry_id=entry_uuid, timestamp=ts, user_id=user_id, llm=llm,
+    if subj_resolved is None or obj_resolved is None:
+        # Skip clearly invalid internal-ID triples but keep the source log entry.
+        log.warning(
+            "ingest: dropping triple with unresolved internal id subject=%r object=%r",
+            triple.subject,
+            triple.object,
+        )
+        return "unresolved_internal_id_or_placeholder"
+
+    subj_exists, subj_node = await _get_or_create_entity_node(
+        db=db,
+        embedder=embedder,
+        llm=llm,
+        config=config,
+        resolved_term=subj_resolved,
+        fallback_type=triple.subject_type,
+        entry_uuid=entry_uuid,
+        ts=ts,
+        user_id=user_id,
+    )
+    obj_exists, obj_node = await _get_or_create_entity_node(
+        db=db,
+        embedder=embedder,
+        llm=llm,
+        config=config,
+        resolved_term=obj_resolved,
+        fallback_type=triple.object_type,
+        entry_uuid=entry_uuid,
+        ts=ts,
+        user_id=user_id,
     )
 
     _track(subj_node.uuid, subj_exists, nodes_created, nodes_updated)
@@ -141,12 +187,114 @@ async def _process_triple(
     await add_entity_link(db, config, obj_node.uuid, rel_id)
     await add_entity_link(db, config, entry_uuid, rel_id)
     await update_hot_edges(db, config, obj_node.uuid, rel_id)
+    return "ok"
 
 
 async def _node_exists(db, config, node_type: str, name: str) -> bool:
     doc_id = stable_entity_doc_id(node_type, name)
     snap = await db.collection(config.lethe_collection).document(doc_id).get()
     return snap.exists
+
+
+def _looks_like_generated_id(value: str) -> bool:
+    s = value.strip()
+    return bool(_GENERATED_ID_RE.fullmatch(s) or _UUID_RE.fullmatch(s))
+
+
+async def _resolve_term(
+    db,
+    config,
+    raw_term: str,
+    node_type: Optional[str] = None,
+) -> Optional[dict]:
+    """Resolve internal IDs to existing node content before ensure_node."""
+    term = (raw_term or "").strip()
+    if not term:
+        return None
+    if _looks_like_placeholder_term(term, node_type):
+        return None
+    if not _looks_like_generated_id(term):
+        return {"text": term, "existing_uuid": None, "resolved_type": None}
+
+    ref = db.collection(config.lethe_collection).document(term)
+    snap = await ref.get()
+    if not snap.exists:
+        return None
+
+    data = snap.to_dict() or {}
+    content = (data.get("content") or "").strip()
+    if not content or _looks_like_generated_id(content):
+        return None
+
+    return {
+        "text": content,
+        "existing_uuid": term,
+        "resolved_type": data.get("node_type"),
+    }
+
+
+def _looks_like_placeholder_term(value: str, node_type: Optional[str] = None) -> bool:
+    s = value.strip().lower()
+    if s in _PLACEHOLDER_TERMS:
+        return True
+    if node_type and s == node_type.strip().lower():
+        return True
+    return False
+
+
+async def _get_or_create_entity_node(
+    db,
+    embedder,
+    llm,
+    config,
+    resolved_term: dict,
+    fallback_type: str,
+    entry_uuid: str,
+    ts: str,
+    user_id: str,
+):
+    existing_uuid = resolved_term.get("existing_uuid")
+    if existing_uuid:
+        ref = db.collection(config.lethe_collection).document(existing_uuid)
+        await ref.update({
+            "journal_entry_ids": ArrayUnion([entry_uuid]),
+            "updated_at": ts,
+        })
+        snap = await ref.get()
+        data = snap.to_dict() or {}
+        node = Node(
+            uuid=existing_uuid,
+            node_type=data.get("node_type", fallback_type),
+            content=(data.get("content") or resolved_term["text"]),
+            domain=data.get("domain", "entity"),
+            weight=float(data.get("weight", data.get("significance_weight", 0.55))),
+            metadata=data.get("metadata", "{}"),
+            entity_links=list(data.get("entity_links", [])),
+            predicate=data.get("predicate"),
+            object_uuid=data.get("object_uuid"),
+            subject_uuid=data.get("subject_uuid"),
+            journal_entry_ids=list(data.get("journal_entry_ids", [])),
+            name_key=data.get("name_key"),
+            hot_edges=list(data.get("hot_edges", [])),
+            relevance_score=data.get("relevance_score"),
+            user_id=data.get("user_id", user_id),
+            source=data.get("source"),
+        )
+        return True, node
+
+    exists = await _node_exists(db, config, fallback_type, resolved_term["text"])
+    node = await ensure_node(
+        db=db,
+        embedder=embedder,
+        config=config,
+        identifier=resolved_term["text"],
+        node_type=fallback_type,
+        source_entry_id=entry_uuid,
+        timestamp=ts,
+        user_id=user_id,
+        llm=llm,
+    )
+    return exists, node
 
 
 def _track(node_uuid: str, existed: bool, created: list, updated: list) -> None:

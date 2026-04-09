@@ -1,5 +1,10 @@
 import pytest
-from lethe.graph.ensure_node import stable_entity_doc_id, stable_rel_id, normalized_predicate
+from lethe.graph.ensure_node import (
+    stable_entity_doc_id,
+    stable_rel_id,
+    normalized_predicate,
+    _looks_like_entity_doc_id,
+)
 
 
 def test_stable_entity_doc_id_deterministic():
@@ -34,3 +39,10 @@ def test_normalized_predicate():
     assert normalized_predicate("  works at  ") == "works_at"
     assert normalized_predicate("NEW:mentors") == "mentors"
     assert normalized_predicate("new:mentors") == "mentors"
+
+
+def test_looks_like_entity_doc_id():
+    assert _looks_like_entity_doc_id("entity_3579d6dd3611a4b7e3cbdb79e5a29698b937bb4e")
+    assert _looks_like_entity_doc_id("ENTITY_3579D6DD3611A4B7E3CBDB79E5A29698B937BB4E")
+    assert not _looks_like_entity_doc_id("entity_abc123")
+    assert not _looks_like_entity_doc_id("Alex Reed")

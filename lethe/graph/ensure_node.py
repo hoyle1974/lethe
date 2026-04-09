@@ -17,6 +17,8 @@ from lethe.models.node import Node
 
 log = logging.getLogger(__name__)
 
+_ENTITY_DOC_ID_RE = re.compile(r"^entity_[0-9a-f]{40}$", re.IGNORECASE)
+
 
 def stable_entity_doc_id(node_type: str, name: str) -> str:
     key = node_type + ":" + name.lower().strip()
@@ -126,6 +128,21 @@ async def ensure_node(
         raise ValueError("ensure_node: empty identifier")
 
     collection = db.collection(config.lethe_collection)
+
+    # Strict internal-ID path: only reuse existing entity docs; never create from ID-like text.
+    if _looks_like_entity_doc_id(clean):
+        id_ref = collection.document(clean)
+        id_snap = await id_ref.get()
+        if not id_snap.exists:
+            raise ValueError(f"ensure_node: entity id not found: {clean}")
+        existing = id_snap.to_dict() or {}
+        if source_entry_id:
+            await id_ref.update({
+                "journal_entry_ids": ArrayUnion([source_entry_id]),
+                "updated_at": timestamp or _now_iso(),
+            })
+        return _doc_to_node(clean, existing)
+
     vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
 
     # Step 1: semantic search
@@ -209,6 +226,10 @@ async def ensure_node(
         return _doc_to_node(doc_id, node_data)
 
     return await _txn_create_or_get(db.transaction())
+
+
+def _looks_like_entity_doc_id(identifier: str) -> bool:
+    return bool(_ENTITY_DOC_ID_RE.fullmatch(identifier.strip()))
 
 
 async def add_entity_link(
