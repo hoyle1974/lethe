@@ -7,6 +7,17 @@ from typing import Optional
 from google.cloud import firestore
 
 from lethe.config import Config
+from lethe.constants import (
+    DEFAULT_DOMAIN,
+    DEFAULT_NODE_TYPE,
+    DEFAULT_USER_ID,
+    EMBEDDING_TASK_RETRIEVAL_QUERY,
+    LOG_NODE_HALF_LIFE_DAYS,
+    NODE_TYPE_ENTITY,
+    NODE_TYPE_LOG,
+    NODE_TYPE_RELATIONSHIP,
+    STRUCTURED_NODE_HALF_LIFE_DAYS,
+)
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector, DistanceMeasure, FieldFilter
 from lethe.models.node import Node
@@ -54,11 +65,11 @@ def parse_to_utc(value: object) -> Optional[datetime]:
 
 
 def half_life_days_for_node_type(node_type: str) -> float:
-    if node_type == "log":
-        return 30.0
-    if node_type in ("entity", "relationship"):
-        return 365.0
-    return 365.0
+    if node_type == NODE_TYPE_LOG:
+        return LOG_NODE_HALF_LIFE_DAYS
+    if node_type in (NODE_TYPE_ENTITY, NODE_TYPE_RELATIONSHIP):
+        return STRUCTURED_NODE_HALF_LIFE_DAYS
+    return STRUCTURED_NODE_HALF_LIFE_DAYS
 
 
 def effective_distance_decay(
@@ -96,9 +107,9 @@ def doc_to_node(doc_id: str, data: dict) -> Node:
             pass
     return Node(
         uuid=doc_id,
-        node_type=data.get("node_type", "generic"),
+        node_type=data.get("node_type", DEFAULT_NODE_TYPE),
         content=data.get("content", ""),
-        domain=data.get("domain", "general"),
+        domain=data.get("domain", DEFAULT_DOMAIN),
         weight=float(data.get("weight", data.get("significance_weight", 0.5))),
         metadata=data.get("metadata", "{}"),
         entity_links=list(data.get("entity_links", [])),
@@ -109,7 +120,7 @@ def doc_to_node(doc_id: str, data: dict) -> Node:
         name_key=data.get("name_key"),
         hot_edges=list(data.get("hot_edges", [])),
         relevance_score=data.get("relevance_score"),
-        user_id=data.get("user_id", "global"),
+        user_id=data.get("user_id", DEFAULT_USER_ID),
         source=data.get("source"),
         created_at=created_at,
         updated_at=updated_at,
@@ -132,7 +143,7 @@ async def vector_search(
     if node_types:
         filters.append(FieldFilter("node_type", "in", node_types))
     else:
-        filters.append(FieldFilter("node_type", "!=", "log"))
+        filters.append(FieldFilter("node_type", "!=", NODE_TYPE_LOG))
     if domain:
         filters.append(FieldFilter("domain", "==", domain))
 
@@ -175,7 +186,7 @@ async def execute_search(
     limit: int,
     min_significance: float,
 ) -> list[Node]:
-    query_vector = await embedder.embed(query, "RETRIEVAL_QUERY")
+    query_vector = await embedder.embed(query, EMBEDDING_TASK_RETRIEVAL_QUERY)
     pool = min(max(limit * 5, limit), _SEARCH_POOL_MAX)
     scored = await vector_search(
         db, config, query_vector, node_types, domain, user_id, pool

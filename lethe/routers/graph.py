@@ -8,6 +8,11 @@ from fastapi import APIRouter, Depends
 from google.cloud import firestore
 
 from lethe.config import Config
+from lethe.constants import (
+    LLM_MAX_TOKENS_GRAPH_SUMMARY_DRAFT,
+    LLM_MAX_TOKENS_GRAPH_SUMMARY_FINAL,
+    LLM_MAX_TOKENS_GRAPH_SUMMARY_THOUGHT,
+)
 from lethe.deps import get_config, get_db, get_embedder, get_llm
 from lethe.graph.search import execute_search
 from lethe.graph.traverse import graph_expand
@@ -177,8 +182,20 @@ async def summarize(
     md = expanded.to_markdown(req.seed_ids)
 
     draft_summary, thought = await asyncio.gather(
-        llm.dispatch(LLMRequest(system_prompt=system, user_prompt=md, max_tokens=2048)),
-        llm.dispatch(LLMRequest(system_prompt=thought_system, user_prompt=md, max_tokens=512)),
+        llm.dispatch(
+            LLMRequest(
+                system_prompt=system,
+                user_prompt=md,
+                max_tokens=LLM_MAX_TOKENS_GRAPH_SUMMARY_DRAFT,
+            )
+        ),
+        llm.dispatch(
+            LLMRequest(
+                system_prompt=thought_system,
+                user_prompt=md,
+                max_tokens=LLM_MAX_TOKENS_GRAPH_SUMMARY_THOUGHT,
+            )
+        ),
     )
     log.info(
         "summarize:pass1_llm draft_chars=%d thought_chars=%d",
@@ -257,7 +274,11 @@ async def summarize(
             f"Enriched Graph:\n{final_md}"
         )
     final_summary = await llm.dispatch(
-        LLMRequest(system_prompt=system, user_prompt=final_prompt, max_tokens=2048)
+        LLMRequest(
+            system_prompt=system,
+            user_prompt=final_prompt,
+            max_tokens=LLM_MAX_TOKENS_GRAPH_SUMMARY_FINAL,
+        )
     )
     final_summary_text = (final_summary or "").strip()
     if len(final_summary_text) < 100:
@@ -277,7 +298,11 @@ async def summarize(
                 f"Graph:\n{final_md}"
             )
         final_summary = await llm.dispatch(
-            LLMRequest(system_prompt=system, user_prompt=retry_prompt, max_tokens=2048)
+            LLMRequest(
+                system_prompt=system,
+                user_prompt=retry_prompt,
+                max_tokens=LLM_MAX_TOKENS_GRAPH_SUMMARY_FINAL,
+            )
         )
         final_summary_text = (final_summary or "").strip()
     log.info(

@@ -11,6 +11,15 @@ from google.cloud import firestore
 from lethe.infra.fs_helpers import Vector, ArrayUnion
 
 from lethe.config import Config
+from lethe.constants import (
+    DEFAULT_DOMAIN,
+    DEFAULT_ENTITY_WEIGHT,
+    DEFAULT_LOG_WEIGHT,
+    DEFAULT_NODE_TYPE,
+    DEFAULT_USER_ID,
+    EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
+    NODE_TYPE_LOG,
+)
 from lethe.graph.canonical_map import CanonicalMap, append_predicate
 from lethe.graph.ensure_node import (
     ensure_node, create_relationship_node, add_entity_link, update_hot_edges,
@@ -27,7 +36,7 @@ _UUID_RE = re.compile(
     re.IGNORECASE,
 )
 _PLACEHOLDER_TERMS = {
-    "generic",
+    DEFAULT_NODE_TYPE,
     "unknown",
     "none",
     "null",
@@ -44,22 +53,22 @@ async def run_ingest(
     config: Config,
     canonical_map: CanonicalMap,
     text: str,
-    domain: str = "general",
+    domain: str = DEFAULT_DOMAIN,
     source: Optional[str] = None,
-    user_id: str = "global",
+    user_id: str = DEFAULT_USER_ID,
     timestamp: Optional[str] = None,
 ) -> IngestResponse:
     ts = timestamp or datetime.now(timezone.utc).isoformat()
     entry_uuid = str(uuid.uuid4())
 
     # Step 1: store episodic log entry
-    vector = await embedder.embed(text, "RETRIEVAL_DOCUMENT")
+    vector = await embedder.embed(text, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
     col = db.collection(config.lethe_collection)
     await col.document(entry_uuid).set({
-        "node_type": "log",
+        "node_type": NODE_TYPE_LOG,
         "content": text,
         "domain": domain,
-        "weight": 0.3,
+        "weight": DEFAULT_LOG_WEIGHT,
         "metadata": "{}",
         "embedding": Vector(vector),
         "entity_links": [],
@@ -206,7 +215,7 @@ async def _resolve_term(
     config,
     raw_term: str,
     node_type: Optional[str] = None,
-    user_id: str = "global",
+    user_id: str = DEFAULT_USER_ID,
 ) -> Optional[dict]:
     """Resolve internal IDs to existing node content before ensure_node."""
     term = (raw_term or "").strip()
@@ -289,7 +298,9 @@ async def _get_or_create_entity_node(
             node_type=data.get("node_type", fallback_type),
             content=(data.get("content") or resolved_term["text"]),
             domain=data.get("domain", "entity"),
-            weight=float(data.get("weight", data.get("significance_weight", 0.55))),
+            weight=float(
+                data.get("weight", data.get("significance_weight", DEFAULT_ENTITY_WEIGHT))
+            ),
             metadata=data.get("metadata", "{}"),
             entity_links=list(data.get("entity_links", [])),
             predicate=data.get("predicate"),

@@ -8,13 +8,18 @@ from google.cloud import firestore
 log = logging.getLogger(__name__)
 
 from lethe.config import Config
+from lethe.constants import (
+    EMBEDDING_TASK_RETRIEVAL_QUERY,
+    NODE_TYPE_LOG,
+    TRAVERSAL_OBSERVATION_WEIGHT,
+    TRAVERSAL_SIMILARITY_WEIGHT,
+    TRAVERSE_BATCH_SIZE,
+    TRAVERSE_NEIGHBOR_QUERY_LIMIT,
+)
 from lethe.graph.ensure_node import stable_self_id
 from lethe.graph.search import cosine_similarity, doc_to_node
 from lethe.infra.embedder import Embedder
 from lethe.models.node import Node, Edge, GraphExpandResponse
-
-_BATCH_SIZE = 100
-
 
 def apply_self_seed_neighbor_floor(
     pruned: list[Node],
@@ -59,11 +64,11 @@ def prune_frontier_by_similarity(
                     cosine_similarity(n.embedding, query_vector)
                     if (query_vector is not None and n.embedding)
                     else 0.0
-                ) * 0.7
+                ) * TRAVERSAL_SIMILARITY_WEIGHT
             )
             + (
                 ((len(n.journal_entry_ids) / max_observation_count) if max_observation_count else 0.0)
-                * 0.3
+                * TRAVERSAL_OBSERVATION_WEIGHT
             ),
         )
         for n in nodes
@@ -88,8 +93,8 @@ async def _fetch_nodes_by_ids(
 ) -> dict[str, Node]:
     col = db.collection(config.lethe_collection)
     result: dict[str, Node] = {}
-    for i in range(0, len(ids), _BATCH_SIZE):
-        chunk = ids[i:i + _BATCH_SIZE]
+    for i in range(0, len(ids), TRAVERSE_BATCH_SIZE):
+        chunk = ids[i:i + TRAVERSE_BATCH_SIZE]
         refs = [col.document(uid) for uid in chunk]
         async for snap in db.get_all(refs):
             if snap.exists:
@@ -111,7 +116,7 @@ async def _get_incoming_spo_edges(
         col
         .where(filter=FieldFilter("object_uuid", "==", node_uuid))
         .where(filter=FieldFilter("user_id", "==", user_id))
-        .limit(50)
+        .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
     )
     ids: list[str] = []
     try:
@@ -135,7 +140,7 @@ async def _get_nodes_linking_to(
         col
         .where(filter=FieldFilter("entity_links", "array_contains", node_uuid))
         .where(filter=FieldFilter("user_id", "==", user_id))
-        .limit(50)
+        .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
     )
     ids: list[str] = []
     try:
@@ -167,7 +172,7 @@ async def graph_expand(
     )
     query_vector: Optional[list[float]] = None
     if query:
-        query_vector = await embedder.embed(query, "RETRIEVAL_QUERY")
+        query_vector = await embedder.embed(query, EMBEDDING_TASK_RETRIEVAL_QUERY)
 
     visited: set[str] = set()
     discovered: set[str] = set()
@@ -179,10 +184,12 @@ async def graph_expand(
     visited.update(seed_ids)
     discovered.update(seed_ids)
     for node in seed_nodes.values():
-        if node.node_type != "log" and _is_alive(node):
+        if node.node_type != NODE_TYPE_LOG and _is_alive(node):
             all_nodes[node.uuid] = node
 
-    frontier = [n for n in seed_nodes.values() if n.node_type != "log" and _is_alive(n)]
+    frontier = [
+        n for n in seed_nodes.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)
+    ]
     log.info(
         "graph_expand:seed_fetch requested=%d found=%d frontier=%d",
         len(seed_ids),
@@ -244,11 +251,13 @@ async def graph_expand(
             if not _is_alive(n):
                 visited.add(n.uuid)
                 continue
-            if n.node_type == "log":
+            if n.node_type == NODE_TYPE_LOG:
                 visited.add(n.uuid)
                 all_nodes[n.uuid] = n  # keep as journal context in response
 
-        non_log = [n for n in candidates.values() if n.node_type != "log" and _is_alive(n)]
+        non_log = [
+            n for n in candidates.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)
+        ]
         self_neighbors = [n for n in non_log if n.uuid in self_neighbor_ids]
 
         pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)

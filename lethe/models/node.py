@@ -3,12 +3,14 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from lethe.constants import DEFAULT_DOMAIN, DEFAULT_USER_ID
+
 
 class Node(BaseModel):
     uuid: str
     node_type: str
     content: str
-    domain: str = "general"
+    domain: str = DEFAULT_DOMAIN
     weight: float = 0.5
     metadata: str = "{}"
     entity_links: list[str] = Field(default_factory=list)
@@ -19,7 +21,7 @@ class Node(BaseModel):
     name_key: Optional[str] = None
     hot_edges: list[str] = Field(default_factory=list)
     relevance_score: Optional[float] = None
-    user_id: str = "global"
+    user_id: str = DEFAULT_USER_ID
     source: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -28,9 +30,9 @@ class Node(BaseModel):
 
 class IngestRequest(BaseModel):
     text: str
-    domain: str = "general"
+    domain: str = DEFAULT_DOMAIN
     source: Optional[str] = None
-    user_id: str = "global"
+    user_id: str = DEFAULT_USER_ID
     timestamp: Optional[datetime] = None
 
 
@@ -45,7 +47,7 @@ class SearchRequest(BaseModel):
     query: str
     node_types: list[str] = Field(default_factory=list)
     domain: Optional[str] = None
-    user_id: str = "global"
+    user_id: str = DEFAULT_USER_ID
     limit: int = 20
     min_significance: float = 0.0
 
@@ -68,7 +70,7 @@ class GraphExpandRequest(BaseModel):
     limit_per_edge: int = 20
     self_seed_neighbor_floor: int = 40
     debug: bool = True
-    user_id: str = "global"
+    user_id: str = DEFAULT_USER_ID
 
 
 class GraphExpandResponse(BaseModel):

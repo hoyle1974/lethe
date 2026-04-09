@@ -10,6 +10,17 @@ from google.cloud import firestore
 from lethe.infra.fs_helpers import Vector, DistanceMeasure, ArrayUnion, FieldFilter
 
 from lethe.config import Config
+from lethe.constants import (
+    DEFAULT_DOMAIN,
+    DEFAULT_ENTITY_WEIGHT,
+    DEFAULT_NODE_TYPE,
+    DEFAULT_RELATIONSHIP_WEIGHT,
+    DEFAULT_USER_ID,
+    EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
+    NODE_TYPE_ENTITY,
+    NODE_TYPE_RELATIONSHIP,
+    RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT,
+)
 from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
 from lethe.infra.embedder import Embedder
 from lethe.infra.llm import LLMDispatcher
@@ -65,9 +76,9 @@ def _doc_to_node(doc_id: str, data: dict) -> Node:
             embedding = None
     return Node(
         uuid=doc_id,
-        node_type=data.get("node_type", "generic"),
+        node_type=data.get("node_type", DEFAULT_NODE_TYPE),
         content=data.get("content", ""),
-        domain=data.get("domain", "general"),
+        domain=data.get("domain", DEFAULT_DOMAIN),
         weight=float(data.get("weight", data.get("significance_weight", 0.5))),
         metadata=data.get("metadata", "{}"),
         entity_links=list(data.get("entity_links", [])),
@@ -78,7 +89,7 @@ def _doc_to_node(doc_id: str, data: dict) -> Node:
         name_key=data.get("name_key"),
         hot_edges=list(data.get("hot_edges", [])),
         relevance_score=data.get("relevance_score"),
-        user_id=data.get("user_id", "global"),
+        user_id=data.get("user_id", DEFAULT_USER_ID),
         source=data.get("source"),
         embedding=embedding,
     )
@@ -119,7 +130,7 @@ async def ensure_node(
     node_type: str,
     source_entry_id: str,
     timestamp: str,
-    user_id: str = "global",
+    user_id: str = DEFAULT_USER_ID,
     llm: Optional[LLMDispatcher] = None,
 ) -> Node:
     """Return an existing entity node or create one.
@@ -153,13 +164,13 @@ async def ensure_node(
                 data["updated_at"] = ts
             return _doc_to_node(doc_id, data)
 
-        vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
+        vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
         node_data = {
             "node_type": "person",
             "content": clean,
             "name_key": clean.lower(),
-            "domain": "entity",
-            "weight": 0.55,
+            "domain": NODE_TYPE_ENTITY,
+            "weight": DEFAULT_ENTITY_WEIGHT,
             "metadata": "{}",
             "entity_links": [],
             "journal_entry_ids": [source_entry_id] if source_entry_id else [],
@@ -185,7 +196,7 @@ async def ensure_node(
             })
         return _doc_to_node(clean, existing)
 
-    vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
+    vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
 
     # Step 1: semantic search
     nearest = await _find_nearest_by_type(
@@ -196,7 +207,7 @@ async def ensure_node(
             from lethe.graph.collision import evaluate_fact_collision
             action = await evaluate_fact_collision(llm, clean, nearest.content)
             if action == "update":
-                new_vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
+                new_vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
                 await collection.document(nearest.uuid).update({
                     "content": clean,
                     "name_key": clean.lower(),
@@ -242,8 +253,8 @@ async def ensure_node(
         "node_type": node_type,
         "content": clean,
         "name_key": name_key,
-        "domain": "entity",
-        "weight": 0.55,
+        "domain": NODE_TYPE_ENTITY,
+        "weight": DEFAULT_ENTITY_WEIGHT,
         "metadata": "{}",
         "entity_links": [],
         "journal_entry_ids": [source_entry_id] if source_entry_id else [],
@@ -336,7 +347,7 @@ async def create_relationship_node(
     subject_content: str,
     object_content: str,
     timestamp: str,
-    user_id: str = "global",
+    user_id: str = DEFAULT_USER_ID,
     llm: Optional[LLMDispatcher] = None,
 ) -> str:
     """Create or update a reified relationship node. Returns the relationship document ID."""
@@ -352,7 +363,7 @@ async def create_relationship_node(
     # Pre-compute embedding before the transaction — async I/O is not allowed
     # inside a Firestore transactional function.
     content = f"{subject_content} {predicate} {object_content}".strip()
-    vector = await embedder.embed(content, "RETRIEVAL_DOCUMENT")
+    vector = await embedder.embed(content, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
 
     superseded_id: Optional[str] = None
     existing_facts: list[tuple[str, str]] = []
@@ -360,9 +371,9 @@ async def create_relationship_node(
         rq = (
             col.where(filter=FieldFilter("user_id", "==", user_id))
             .where(filter=FieldFilter("subject_uuid", "==", subject_id))
-            .where(filter=FieldFilter("node_type", "==", "relationship"))
+            .where(filter=FieldFilter("node_type", "==", NODE_TYPE_RELATIONSHIP))
             .order_by("updated_at", direction=firestore.Query.DESCENDING)
-            .limit(10)
+            .limit(RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT)
         )
         async for doc in rq.stream():
             if doc.id == rel_id:
@@ -378,15 +389,15 @@ async def create_relationship_node(
         superseded_id = await evaluate_relationship_supersedes(llm, content, existing_facts)
 
     create_data = {
-        "node_type": "relationship",
+        "node_type": NODE_TYPE_RELATIONSHIP,
         "content": content,
         "predicate": predicate,
         "subject_uuid": subject_id,
         "object_uuid": object_id,
         "entity_links": [subject_id, object_id],
         "journal_entry_ids": [source_entry_id] if source_entry_id else [],
-        "domain": "relationship",
-        "weight": 0.8,
+        "domain": NODE_TYPE_RELATIONSHIP,
+        "weight": DEFAULT_RELATIONSHIP_WEIGHT,
         "metadata": "{}",
         "embedding": Vector(vector),
         "relevance_score": 1.0,

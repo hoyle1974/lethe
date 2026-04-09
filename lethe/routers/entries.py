@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from google.cloud import firestore
 
 from lethe.config import Config
+from lethe.constants import DEFAULT_USER_ID, NODE_TYPE_LOG
 from lethe.deps import get_config, get_db
 from lethe.graph.search import doc_to_node
 from lethe.models.node import Node
@@ -22,14 +23,14 @@ async def get_entry(
     if not snap.exists:
         raise HTTPException(status_code=404, detail="entry not found")
     data = snap.to_dict() or {}
-    if data.get("node_type") != "log":
+    if data.get("node_type") != NODE_TYPE_LOG:
         raise HTTPException(status_code=404, detail="entry not found")
     return doc_to_node(snap.id, data)
 
 
 @router.get("/v1/entries", response_model=list[Node])
 async def list_entries(
-    user_id: str = Query(default="global"),
+    user_id: str = Query(default=DEFAULT_USER_ID),
     limit: int = Query(default=20, ge=1, le=500),
     ascending: bool = Query(default=False),
     since: Optional[str] = Query(default=None),
@@ -44,7 +45,7 @@ async def list_entries(
     results: list[Node] = []
     async for doc in q.stream():
         data = doc.to_dict() or {}
-        if data.get("node_type") != "log":
+        if data.get("node_type") != NODE_TYPE_LOG:
             continue
         if since and data.get("created_at", "") < since:
             continue

@@ -6,6 +6,7 @@ from typing import Optional
 
 from google.cloud import firestore
 
+from lethe.constants import LLM_MAX_TOKENS_RELATIONSHIP_SUPERSEDES
 from lethe.infra.llm import LLMDispatcher, LLMRequest
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,11 @@ async def evaluate_relationship_supersedes(
     )
     try:
         text = await llm.dispatch(
-            LLMRequest(system_prompt=system, user_prompt=user, max_tokens=64)
+            LLMRequest(
+                system_prompt=system,
+                user_prompt=user,
+                max_tokens=LLM_MAX_TOKENS_RELATIONSHIP_SUPERSEDES,
+            )
         )
     except Exception as e:
         log.warning("evaluate_relationship_supersedes LLM failed: %s", e)

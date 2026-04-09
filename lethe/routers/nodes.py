@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from google.cloud import firestore
 
 from lethe.config import Config
+from lethe.constants import DEFAULT_USER_ID
 from lethe.deps import get_config, get_db
 from lethe.graph.search import doc_to_node
 from lethe.models.node import Node
@@ -28,7 +29,7 @@ async def get_node(
 async def list_nodes(
     node_type: Optional[str] = Query(default=None),
     domain: Optional[str] = Query(default=None),
-    user_id: str = Query(default="global"),
+    user_id: str = Query(default=DEFAULT_USER_ID),
     limit: int = Query(default=20, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: firestore.AsyncClient = Depends(get_db),

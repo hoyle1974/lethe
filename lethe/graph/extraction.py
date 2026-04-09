@@ -8,6 +8,10 @@ log = logging.getLogger(__name__)
 
 from jinja2 import Environment, BaseLoader
 
+from lethe.constants import (
+    DEFAULT_NODE_TYPE,
+    LLM_MAX_TOKENS_EXTRACTION,
+)
 from lethe.infra.llm import LLMDispatcher, LLMRequest
 from lethe.graph.ensure_node import normalized_predicate
 
@@ -36,8 +40,8 @@ class RefineryTriple:
     subject: str
     predicate: str
     object: str
-    subject_type: str = "generic"
-    object_type: str = "generic"
+    subject_type: str = DEFAULT_NODE_TYPE
+    object_type: str = DEFAULT_NODE_TYPE
     is_new_predicate: bool = False
     canonical_predicate: str = ""
 
@@ -80,8 +84,8 @@ def parse_refinery_output(raw: str) -> tuple[str, list[RefineryTriple]]:
             subject, predicate, obj = parts[0], parts[1], parts[2]
             if not subject or not predicate or not obj:
                 continue
-            sub_type = parts[3] if len(parts) == 5 else "generic"
-            obj_type = parts[4] if len(parts) == 5 else "generic"
+            sub_type = parts[3] if len(parts) == 5 else DEFAULT_NODE_TYPE
+            obj_type = parts[4] if len(parts) == 5 else DEFAULT_NODE_TYPE
             triples.append(RefineryTriple(
                 subject=subject,
                 predicate=predicate,
@@ -123,7 +127,7 @@ async def extract_triples(
     raw = await llm.dispatch(LLMRequest(
         system_prompt=REFINERY_SYSTEM,
         user_prompt=prompt,
-        max_tokens=2048,
+        max_tokens=LLM_MAX_TOKENS_EXTRACTION,
     ))
     log.info("extraction: raw LLM response:\n%s", raw)
     status, triples = parse_refinery_output(raw)

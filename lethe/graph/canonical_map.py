@@ -1,5 +1,10 @@
 from dataclasses import dataclass, field
 from google.cloud import firestore
+from lethe.constants import (
+    DEFAULT_NODE_TYPE,
+    NODE_TYPE_LOG,
+    NODE_TYPE_RELATIONSHIP,
+)
 from lethe.infra.fs_helpers import ArrayUnion
 
 CONFIG_COLLECTION = "_config"
@@ -7,7 +12,7 @@ CANONICAL_MAP_DOC = "canonical_map"
 
 DEFAULT_NODE_TYPES = [
     "person", "place", "event", "project", "goal",
-    "preference", "asset", "tool", "generic", "relationship", "log",
+    "preference", "asset", "tool", DEFAULT_NODE_TYPE, NODE_TYPE_RELATIONSHIP, NODE_TYPE_LOG,
 ]
 
 DEFAULT_PREDICATES = [

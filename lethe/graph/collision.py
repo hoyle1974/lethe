@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 
+from lethe.constants import LLM_MAX_TOKENS_FACT_COLLISION
 from lethe.infra.llm import LLMDispatcher, LLMRequest
 
 _PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -26,7 +27,7 @@ async def evaluate_fact_collision(
         text = await llm.dispatch(LLMRequest(
             system_prompt=_get_collision_system(),
             user_prompt=user_prompt,
-            max_tokens=16,
+            max_tokens=LLM_MAX_TOKENS_FACT_COLLISION,
         ))
         if "update" in text.lower():
             return "update"
