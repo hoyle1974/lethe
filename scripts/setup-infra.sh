@@ -61,10 +61,9 @@ gcloud firestore databases create \
 
 echo -e "${CYAN}Deploying Firestore indexes...${NC}"
 if command -v firebase &>/dev/null; then
-  firebase use "$PROJECT" 2>/dev/null || true
   firebase deploy --only firestore:indexes --project "$PROJECT" --non-interactive --force
 else
-  echo -e "${YELLOW}Firebase CLI not found — deploy indexes manually with: firebase deploy --only firestore:indexes${NC}"
+  echo -e "${YELLOW}Firebase CLI not found — deploy indexes manually with: firebase deploy --only firestore:indexes --project $PROJECT${NC}"
 fi
 
 echo ""
