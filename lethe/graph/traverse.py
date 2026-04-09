@@ -8,11 +8,34 @@ from google.cloud import firestore
 log = logging.getLogger(__name__)
 
 from lethe.config import Config
+from lethe.graph.ensure_node import stable_self_id
 from lethe.graph.search import cosine_similarity, doc_to_node
 from lethe.infra.embedder import Embedder
 from lethe.models.node import Node, Edge, GraphExpandResponse
 
 _BATCH_SIZE = 100
+
+
+def apply_self_seed_neighbor_floor(
+    pruned: list[Node],
+    self_neighbors: list[Node],
+    query_vector: Optional[list[float]],
+    floor: int,
+    hop_idx: int,
+    self_in_frontier: bool,
+) -> list[Node]:
+    """Keep a minimum number of first-hop SELF neighbors from being pruned."""
+    if hop_idx != 0 or not self_in_frontier or floor <= 0:
+        return pruned
+
+    selected_self = prune_frontier_by_similarity(self_neighbors, query_vector, floor)
+    existing = {n.uuid for n in pruned}
+    merged = list(pruned)
+    for node in selected_self:
+        if node.uuid not in existing:
+            merged.append(node)
+            existing.add(node.uuid)
+    return merged
 
 
 def _is_alive(n: Node) -> bool:
@@ -27,13 +50,34 @@ def prune_frontier_by_similarity(
 ) -> list[Node]:
     if len(nodes) <= top_k:
         return nodes
-    if query_vector is None:
-        return nodes[:top_k]
+    max_observation_count = max(len(n.journal_entry_ids) for n in nodes) if nodes else 0
     scored = [
-        (n, cosine_similarity(n.embedding, query_vector) if n.embedding else 0.0)
+        (
+            n,
+            (
+                (
+                    cosine_similarity(n.embedding, query_vector)
+                    if (query_vector is not None and n.embedding)
+                    else 0.0
+                ) * 0.7
+            )
+            + (
+                ((len(n.journal_entry_ids) / max_observation_count) if max_observation_count else 0.0)
+                * 0.3
+            ),
+        )
         for n in nodes
     ]
     scored.sort(key=lambda x: x[1], reverse=True)
+    kept = [n.uuid for n, _ in scored[:top_k]]
+    log.info(
+        "prune_frontier: candidates=%d top_k=%d query=%s max_obs=%d kept=%s",
+        len(nodes),
+        top_k,
+        bool(query_vector),
+        max_observation_count,
+        kept,
+    )
     return [n for n, _ in scored[:top_k]]
 
 
@@ -111,31 +155,52 @@ async def graph_expand(
     hops: int,
     limit_per_edge: int,
     user_id: str,
+    self_seed_neighbor_floor: int = 40,
 ) -> GraphExpandResponse:
+    log.info(
+        "graph_expand:start seeds=%d hops=%d limit_per_edge=%d user_id=%s has_query=%s",
+        len(seed_ids),
+        hops,
+        limit_per_edge,
+        user_id,
+        bool(query),
+    )
     query_vector: Optional[list[float]] = None
     if query:
         query_vector = await embedder.embed(query, "RETRIEVAL_QUERY")
 
     visited: set[str] = set()
+    discovered: set[str] = set()
     all_nodes: dict[str, Node] = {}
     all_edges: list[Edge] = []
 
     # Seed fetch — exclude log entries from graph
     seed_nodes = await _fetch_nodes_by_ids(db, config, seed_ids)
     visited.update(seed_ids)
+    discovered.update(seed_ids)
     for node in seed_nodes.values():
         if node.node_type != "log" and _is_alive(node):
             all_nodes[node.uuid] = node
 
     frontier = [n for n in seed_nodes.values() if n.node_type != "log" and _is_alive(n)]
+    log.info(
+        "graph_expand:seed_fetch requested=%d found=%d frontier=%d",
+        len(seed_ids),
+        len(seed_nodes),
+        len(frontier),
+    )
 
     sem = asyncio.Semaphore(10)
 
-    for _hop in range(hops):
+    for hop_idx in range(hops):
         if not frontier:
+            log.info("graph_expand:hop=%d frontier_empty", hop_idx + 1)
             break
 
         next_ids: set[str] = set()
+        self_neighbor_ids: set[str] = set()
+        self_seed_id = stable_self_id(user_id)
+        self_in_frontier = any(node.uuid == self_seed_id for node in frontier)
 
         gather_tasks = [
             _gather_neighbors(db, config, node, user_id, sem)
@@ -149,8 +214,10 @@ async def graph_expand(
             if node.object_uuid:
                 candidate_ids.add(node.object_uuid)
             candidate_ids.update(node.entity_links)
-            candidate_ids -= visited
+            candidate_ids -= discovered
             next_ids.update(candidate_ids)
+            if hop_idx == 0 and node.uuid == self_seed_id:
+                self_neighbor_ids.update(candidate_ids)
 
             if (
                 node.node_type == "relationship"
@@ -165,7 +232,9 @@ async def graph_expand(
                 ))
 
         if not next_ids:
+            log.info("graph_expand:hop=%d no_next_ids frontier=%d", hop_idx + 1, len(frontier))
             break
+        discovered.update(next_ids)
 
         candidates = await _fetch_nodes_by_ids(db, config, list(next_ids))
         # Log entries: include in all_nodes as context but never put in the
@@ -180,8 +249,17 @@ async def graph_expand(
                 all_nodes[n.uuid] = n  # keep as journal context in response
 
         non_log = [n for n in candidates.values() if n.node_type != "log" and _is_alive(n)]
+        self_neighbors = [n for n in non_log if n.uuid in self_neighbor_ids]
 
         pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)
+        pruned = apply_self_seed_neighbor_floor(
+            pruned=pruned,
+            self_neighbors=self_neighbors,
+            query_vector=query_vector,
+            floor=self_seed_neighbor_floor,
+            hop_idx=hop_idx,
+            self_in_frontier=self_in_frontier,
+        )
 
         for node in pruned:
             if node.uuid not in visited:
@@ -189,7 +267,20 @@ async def graph_expand(
                 all_nodes[node.uuid] = node
 
         frontier = pruned
+        log.info(
+            "graph_expand:hop=%d frontier_in=%d next_ids=%d candidates=%d non_log=%d pruned=%d logs=%d total_nodes=%d total_edges=%d",
+            hop_idx + 1,
+            len(neighbor_lists),
+            len(next_ids),
+            len(candidates),
+            len(non_log),
+            len(pruned),
+            len(candidates) - len(non_log),
+            len(all_nodes),
+            len(all_edges),
+        )
 
+    log.info("graph_expand:done nodes=%d edges=%d", len(all_nodes), len(all_edges))
     return GraphExpandResponse(nodes=all_nodes, edges=all_edges)
 
 

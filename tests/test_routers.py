@@ -3,6 +3,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from lethe.graph.canonical_map import CanonicalMap
+from lethe.models.node import GraphExpandResponse, Node
 
 
 def _make_test_client(mock_embedder=None, mock_llm=None, mock_db=None):
@@ -96,3 +97,282 @@ def test_delete_entry_method_not_allowed(mock_embedder, mock_llm):
     client = _make_test_client(mock_embedder, mock_llm)
     resp = client.delete("/v1/entries/some-uuid")
     assert resp.status_code == 405
+
+
+def test_graph_summarize_runs_iterative_reasoning_loop(mock_embedder, mock_llm):
+    first_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alice",
+                journal_entry_ids=[],
+            ),
+            "target-1": Node(
+                uuid="target-1",
+                node_type="generic",
+                content="Acme",
+                journal_entry_ids=[],
+            ),
+        },
+        edges=[],
+    )
+    second_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alice",
+                journal_entry_ids=[],
+            ),
+            "target-1": Node(
+                uuid="target-1",
+                node_type="generic",
+                content="Acme",
+                journal_entry_ids=[],
+            ),
+        },
+        edges=[],
+    )
+    graph_expand_mock = AsyncMock(side_effect=[first_expand, second_expand])
+    search_mock = AsyncMock(return_value=[Node(uuid="target-1", node_type="generic", content="Acme")])
+    llm_dispatch_mock = AsyncMock(side_effect=[
+        "Draft summary paragraph",
+        "Acme Corp",
+        (
+            "Alex Reed is a lead engineer at TechFlow, works closely with teammates, "
+            "and is actively balancing multiple responsibilities across project planning, "
+            "technical delivery, and ongoing collaboration while keeping personal obligations in view."
+        ),
+    ])
+    mock_llm.dispatch = llm_dispatch_mock
+    client = _make_test_client(mock_embedder, mock_llm)
+
+    with patch("lethe.routers.graph.graph_expand", graph_expand_mock), patch("lethe.routers.graph.execute_search", search_mock):
+        resp = client.post(
+            "/v1/graph/summarize",
+                json={"seed_ids": ["seed-1"], "query": "Who is Alice?", "debug": False},
+        )
+
+    assert resp.status_code == 200
+    assert "lead engineer at TechFlow" in resp.json()["summary"]
+    assert graph_expand_mock.await_count == 2
+    second_call = graph_expand_mock.await_args_list[1].kwargs
+    assert second_call["seed_ids"] == ["target-1"]
+    assert second_call["hops"] == 1
+    assert second_call["limit_per_edge"] == 20
+    assert second_call["self_seed_neighbor_floor"] == 40
+    assert search_mock.await_count == 1
+    assert llm_dispatch_mock.await_count == 3
+
+
+def test_graph_summarize_debug_mode_returns_reasoning(mock_embedder, mock_llm):
+    first_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alice",
+                journal_entry_ids=[],
+            ),
+            "target-1": Node(
+                uuid="target-1",
+                node_type="generic",
+                content="Acme",
+                journal_entry_ids=[],
+            ),
+        },
+        edges=[],
+    )
+    second_expand = GraphExpandResponse(
+        nodes={
+            "target-1": Node(
+                uuid="target-1",
+                node_type="generic",
+                content="Acme",
+                journal_entry_ids=["j1", "j2"],
+            )
+        },
+        edges=[],
+    )
+    graph_expand_mock = AsyncMock(side_effect=[first_expand, second_expand])
+    search_mock = AsyncMock(return_value=[Node(uuid="target-1", node_type="generic", content="Acme")])
+    llm_dispatch_mock = AsyncMock(side_effect=[
+        "Draft summary paragraph",
+        "Acme",
+        (
+            "Alex Reed is a lead engineer at TechFlow, works closely with teammates, "
+            "and is actively balancing multiple responsibilities across project planning, "
+            "technical delivery, and ongoing collaboration while keeping personal obligations in view."
+        ),
+    ])
+    mock_llm.dispatch = llm_dispatch_mock
+    client = _make_test_client(mock_embedder, mock_llm)
+
+    with patch("lethe.routers.graph.graph_expand", graph_expand_mock), patch("lethe.routers.graph.execute_search", search_mock):
+        resp = client.post(
+            "/v1/graph/summarize",
+            json={"seed_ids": ["seed-1"], "query": "Who is Alice?", "debug": True},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "lead engineer at TechFlow" in data["summary"]
+    assert "debug_reasoning" in data
+    assert data["debug_reasoning"]["target_queries"] == ["Acme"]
+    assert data["debug_reasoning"]["retrieval_seed_ids"] == ["target-1"]
+    assert data["debug_reasoning"]["pass2"]["performed"] is True
+
+
+def test_graph_summarize_ignores_non_uuid_thought_tokens(mock_embedder, mock_llm):
+    first_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alex Reed",
+                journal_entry_ids=[],
+            )
+        },
+        edges=[],
+    )
+    graph_expand_mock = AsyncMock(side_effect=[first_expand])
+    search_mock = AsyncMock(return_value=[])
+    llm_dispatch_mock = AsyncMock(side_effect=[
+        "Draft summary paragraph",
+        "entity\nTechFlow\nAlex Reed\nworks",
+        (
+            "Alex Reed is a lead engineer at TechFlow, works closely with teammates, "
+            "and is actively balancing multiple responsibilities across project planning, "
+            "technical delivery, and ongoing collaboration while keeping personal obligations in view."
+        ),
+    ])
+    mock_llm.dispatch = llm_dispatch_mock
+    client = _make_test_client(mock_embedder, mock_llm)
+
+    with patch("lethe.routers.graph.graph_expand", graph_expand_mock), patch("lethe.routers.graph.execute_search", search_mock):
+        resp = client.post(
+            "/v1/graph/summarize",
+            json={"seed_ids": ["seed-1"], "query": "alex", "debug": True},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "lead engineer at TechFlow" in data["summary"]
+    assert data["debug_reasoning"]["target_queries"] == ["entity", "TechFlow", "Alex Reed"]
+    assert data["debug_reasoning"]["retrieval_seed_ids"] == []
+    assert data["debug_reasoning"]["pass2"]["performed"] is False
+    assert graph_expand_mock.await_count == 1
+
+
+def test_graph_summarize_retries_when_final_summary_too_short(mock_embedder, mock_llm):
+    first_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alex Reed",
+                journal_entry_ids=[],
+            )
+        },
+        edges=[],
+    )
+    graph_expand_mock = AsyncMock(side_effect=[first_expand])
+    search_mock = AsyncMock(return_value=[])
+    llm_dispatch_mock = AsyncMock(side_effect=[
+        "Draft summary paragraph",
+        "NONE",
+        "Too short.",
+        "This is a sufficiently long final summary paragraph that includes detailed facts about Alex Reed and should be returned.",
+    ])
+    mock_llm.dispatch = llm_dispatch_mock
+    client = _make_test_client(mock_embedder, mock_llm)
+
+    with patch("lethe.routers.graph.graph_expand", graph_expand_mock), patch("lethe.routers.graph.execute_search", search_mock):
+        resp = client.post(
+            "/v1/graph/summarize",
+            json={"seed_ids": ["seed-1"], "query": "alex", "debug": False},
+        )
+
+    assert resp.status_code == 200
+    assert "sufficiently long final summary paragraph" in resp.json()["summary"]
+    assert llm_dispatch_mock.await_count == 4
+
+
+def test_graph_summarize_broad_query_disables_semantic_pruning(mock_embedder, mock_llm):
+    first_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alex Reed",
+                journal_entry_ids=[],
+            )
+        },
+        edges=[],
+    )
+    graph_expand_mock = AsyncMock(side_effect=[first_expand])
+    search_mock = AsyncMock(return_value=[])
+    llm_dispatch_mock = AsyncMock(side_effect=[
+        "Draft summary paragraph",
+        "NONE",
+        (
+            "Alex Reed is a lead engineer at TechFlow, works closely with teammates, "
+            "and is actively balancing multiple responsibilities across project planning, "
+            "technical delivery, and ongoing collaboration while keeping personal obligations in view."
+        ),
+    ])
+    mock_llm.dispatch = llm_dispatch_mock
+    client = _make_test_client(mock_embedder, mock_llm)
+
+    with patch("lethe.routers.graph.graph_expand", graph_expand_mock), patch("lethe.routers.graph.execute_search", search_mock):
+        resp = client.post(
+            "/v1/graph/summarize",
+            json={"seed_ids": ["seed-1"], "query": "alex", "debug": True},
+        )
+
+    assert resp.status_code == 200
+    first_call = graph_expand_mock.await_args_list[0].kwargs
+    assert first_call["query"] is None
+    assert resp.json()["debug_reasoning"]["broad_query_mode"] is True
+
+
+def test_graph_summarize_question_query_returns_answer_evidence_shape(mock_embedder, mock_llm):
+    first_expand = GraphExpandResponse(
+        nodes={
+            "seed-1": Node(
+                uuid="seed-1",
+                node_type="person",
+                content="Alex Reed",
+                journal_entry_ids=[],
+            ),
+            "seed-2": Node(
+                uuid="seed-2",
+                node_type="entity",
+                content="Buster",
+                journal_entry_ids=[],
+            ),
+        },
+        edges=[],
+    )
+    graph_expand_mock = AsyncMock(side_effect=[first_expand])
+    search_mock = AsyncMock(return_value=[])
+    llm_dispatch_mock = AsyncMock(side_effect=[
+        "Answer: Alex's dog is Buster.\n\nEvidence:\n- Alex lives with Buster.",
+        "NONE",
+        "Answer: Alex's dog is Buster.\n\nEvidence:\n- Alex lives with Buster.\n- Buster has a vet appointment record.",
+    ])
+    mock_llm.dispatch = llm_dispatch_mock
+    client = _make_test_client(mock_embedder, mock_llm)
+
+    with patch("lethe.routers.graph.graph_expand", graph_expand_mock), patch("lethe.routers.graph.execute_search", search_mock):
+        resp = client.post(
+            "/v1/graph/summarize",
+            json={"seed_ids": ["seed-1"], "query": "Who is Alex's dog?", "debug": True},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "Answer:" in body["summary"]
+    assert "Evidence:" in body["summary"]
+    assert body["debug_reasoning"]["question_query_mode"] is True

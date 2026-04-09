@@ -14,7 +14,7 @@ from lethe.config import Config
 from lethe.graph.canonical_map import CanonicalMap, append_predicate
 from lethe.graph.ensure_node import (
     ensure_node, create_relationship_node, add_entity_link, update_hot_edges,
-    stable_entity_doc_id,
+    stable_entity_doc_id, stable_self_id,
 )
 from lethe.graph.extraction import extract_triples, RefineryTriple
 from lethe.infra.embedder import Embedder
@@ -135,8 +135,8 @@ async def _process_triple(
         if predicate not in canonical_map.allowed_predicates:
             canonical_map.allowed_predicates.append(predicate)
 
-    subj_resolved = await _resolve_term(db, config, triple.subject, triple.subject_type)
-    obj_resolved = await _resolve_term(db, config, triple.object, triple.object_type)
+    subj_resolved = await _resolve_term(db, config, triple.subject, triple.subject_type, user_id)
+    obj_resolved = await _resolve_term(db, config, triple.object, triple.object_type, user_id)
 
     if subj_resolved is None or obj_resolved is None:
         # Skip clearly invalid internal-ID triples but keep the source log entry.
@@ -206,11 +206,19 @@ async def _resolve_term(
     config,
     raw_term: str,
     node_type: Optional[str] = None,
+    user_id: str = "global",
 ) -> Optional[dict]:
     """Resolve internal IDs to existing node content before ensure_node."""
     term = (raw_term or "").strip()
     if not term:
         return None
+    if term.upper() == "SELF":
+        return {
+            "text": "Me",
+            "existing_uuid": stable_self_id(user_id),
+            "resolved_type": "person",
+            "self_token": True,
+        }
     if _looks_like_placeholder_term(term, node_type):
         return None
     if not _looks_like_generated_id(term):
@@ -256,6 +264,20 @@ async def _get_or_create_entity_node(
     existing_uuid = resolved_term.get("existing_uuid")
     if existing_uuid:
         ref = db.collection(config.lethe_collection).document(existing_uuid)
+        snap = await ref.get()
+        if not snap.exists and resolved_term.get("self_token"):
+            node = await ensure_node(
+                db=db,
+                embedder=embedder,
+                config=config,
+                identifier="SELF",
+                node_type="person",
+                source_entry_id=entry_uuid,
+                timestamp=ts,
+                user_id=user_id,
+                llm=llm,
+            )
+            return False, node
         await ref.update({
             "journal_entry_ids": ArrayUnion([entry_uuid]),
             "updated_at": ts,

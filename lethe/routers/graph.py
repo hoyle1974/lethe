@@ -1,16 +1,87 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import re
+
 from fastapi import APIRouter, Depends
 from google.cloud import firestore
 
 from lethe.config import Config
 from lethe.deps import get_config, get_db, get_embedder, get_llm
+from lethe.graph.search import execute_search
 from lethe.graph.traverse import graph_expand
 from lethe.infra.embedder import Embedder
 from lethe.infra.llm import LLMDispatcher, LLMRequest
 from lethe.models.node import GraphExpandRequest, GraphExpandResponse, GraphSummarizeResponse
 
 router = APIRouter()
+log = logging.getLogger(__name__)
+_BULLET_PREFIX = re.compile(r"^\s*(?:[-*]\s+|\d+[.)]\s+)")
+
+
+def _extract_target_queries(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text or text.upper() == "NONE":
+        return []
+    candidates: list[str] = []
+    chunks = re.split(r"[\n,;]+", text)
+    for chunk in chunks:
+        normalized = _BULLET_PREFIX.sub("", chunk).strip(" .")
+        if not normalized:
+            continue
+        if normalized.upper() == "NONE":
+            continue
+        if normalized not in candidates:
+            candidates.append(normalized)
+    return candidates[:3]
+
+
+def _is_broad_query(query: str) -> bool:
+    parts = [p for p in re.split(r"\s+", (query or "").strip()) if p]
+    return len(parts) <= 2
+
+
+def _is_question_query(query: str) -> bool:
+    q = (query or "").strip().lower()
+    if not q:
+        return False
+    if "?" in q:
+        return True
+    question_starts = (
+        "who",
+        "what",
+        "when",
+        "where",
+        "why",
+        "how",
+        "which",
+        "whom",
+        "whose",
+        "is ",
+        "are ",
+        "do ",
+        "does ",
+        "did ",
+        "can ",
+        "could ",
+        "should ",
+        "would ",
+    )
+    return q.startswith(question_starts)
+
+
+def _merge_graphs(base: GraphExpandResponse, extra: GraphExpandResponse) -> GraphExpandResponse:
+    merged_nodes = dict(base.nodes)
+    merged_nodes.update(extra.nodes)
+    merged_edges = list(base.edges)
+    seen_edges = {(e.subject, e.predicate, e.object) for e in merged_edges}
+    for edge in extra.edges:
+        key = (edge.subject, edge.predicate, edge.object)
+        if key not in seen_edges:
+            seen_edges.add(key)
+            merged_edges.append(edge)
+    return GraphExpandResponse(nodes=merged_nodes, edges=merged_edges)
 
 
 @router.post("/v1/graph/expand", response_model=GraphExpandResponse)
@@ -28,11 +99,16 @@ async def expand(
         query=req.query,
         hops=req.hops,
         limit_per_edge=req.limit_per_edge,
+        self_seed_neighbor_floor=req.self_seed_neighbor_floor,
         user_id=req.user_id,
     )
 
 
-@router.post("/v1/graph/summarize", response_model=GraphSummarizeResponse)
+@router.post(
+    "/v1/graph/summarize",
+    response_model=GraphSummarizeResponse,
+    response_model_exclude_none=True,
+)
 async def summarize(
     req: GraphExpandRequest,
     db: firestore.AsyncClient = Depends(get_db),
@@ -40,24 +116,203 @@ async def summarize(
     config: Config = Depends(get_config),
     llm: LLMDispatcher = Depends(get_llm),
 ) -> GraphSummarizeResponse:
+    log.info(
+        "summarize:start seeds=%d hops=%d limit_per_edge=%d user_id=%s query_len=%d",
+        len(req.seed_ids),
+        req.hops,
+        req.limit_per_edge,
+        req.user_id,
+        len((req.query or "").strip()),
+    )
+    broad_query_mode = _is_broad_query(req.query or "")
+    question_query_mode = _is_question_query(req.query or "")
+    expansion_query = None if broad_query_mode else req.query
+    log.info(
+        "summarize:query_mode broad=%s question=%s expansion_query=%s",
+        broad_query_mode,
+        question_query_mode,
+        bool(expansion_query),
+    )
     expanded = await graph_expand(
         db=db,
         embedder=embedder,
         config=config,
         seed_ids=req.seed_ids,
-        query=req.query,
+        query=expansion_query,
         hops=req.hops,
         limit_per_edge=req.limit_per_edge,
+        self_seed_neighbor_floor=req.self_seed_neighbor_floor,
         user_id=req.user_id,
     )
+    log.info(
+        "summarize:pass1_graph nodes=%d edges=%d",
+        len(expanded.nodes),
+        len(expanded.edges),
+    )
     q = req.query if req.query is not None else ""
-    system = (
-        "You are a memory summarization engine. Review the following knowledge graph extraction. "
-        f"Write a single, dense paragraph summarizing the facts most relevant to the query: {q}. "
-        "Do not use conversational filler."
+    if question_query_mode:
+        system = (
+            "You are a query-resolution RAG engine. Resolve the user query using only graph evidence: "
+            f"{q}. Return markdown with sections:\n"
+            "Answer: direct response to the query.\n"
+            "Evidence: bullet points with the most relevant supporting facts.\n"
+            "Gaps: what is unknown or not supported by the retrieved graph.\n"
+            "Do not use conversational filler."
+        )
+    else:
+        system = (
+            "You are a query-resolution RAG engine. Resolve this free-form query using only graph evidence: "
+            f"{q}. Return markdown with sections:\n"
+            "Response: concise synthesis or recommended resolution grounded in facts.\n"
+            "Evidence: bullet points with concrete supporting facts.\n"
+            "Gaps: what is unknown, missing, or uncertain.\n"
+            "Use short sections and bullets, not a single paragraph. Do not use conversational filler."
+        )
+    thought_system = (
+        f"Query focus: {q}. Based on the current graph data and this query, identify missing entities or relationships "
+        "that would make this summary more complete? Reply with up to 3 short retrieval queries "
+        "(entity names, relationship phrases, or topics), one per line, or 'NONE'. "
+        "Keep each query tightly relevant to the user query; avoid tangential topics."
     )
     md = expanded.to_markdown(req.seed_ids)
-    text = await llm.dispatch(
-        LLMRequest(system_prompt=system, user_prompt=md, max_tokens=2048)
+
+    draft_summary, thought = await asyncio.gather(
+        llm.dispatch(LLMRequest(system_prompt=system, user_prompt=md, max_tokens=2048)),
+        llm.dispatch(LLMRequest(system_prompt=thought_system, user_prompt=md, max_tokens=512)),
     )
-    return GraphSummarizeResponse(summary=(text or "").strip())
+    log.info(
+        "summarize:pass1_llm draft_chars=%d thought_chars=%d",
+        len((draft_summary or "").strip()),
+        len((thought or "").strip()),
+    )
+
+    target_queries = _extract_target_queries(thought or "")
+    retrieval_seed_ids: list[str] = []
+    if target_queries:
+        search_results = await asyncio.gather(*[
+            execute_search(
+                db=db,
+                embedder=embedder,
+                config=config,
+                query=target_query,
+                node_types=[],
+                domain=None,
+                user_id=req.user_id,
+                limit=5,
+                min_significance=0.0,
+            )
+            for target_query in target_queries
+        ])
+        seen_seed_ids: set[str] = set()
+        for nodes in search_results:
+            for node in nodes:
+                if node.uuid not in seen_seed_ids:
+                    seen_seed_ids.add(node.uuid)
+                    retrieval_seed_ids.append(node.uuid)
+
+    log.info(
+        "summarize:thought_targets queries=%d retrieval_seed_ids=%d",
+        len(target_queries),
+        len(retrieval_seed_ids),
+    )
+    combined = expanded
+    pass2_performed = False
+    if retrieval_seed_ids:
+        pass2_performed = True
+        extra = await graph_expand(
+            db=db,
+            embedder=embedder,
+            config=config,
+            seed_ids=retrieval_seed_ids,
+            query=expansion_query,
+            hops=1,
+            limit_per_edge=req.limit_per_edge,
+            self_seed_neighbor_floor=req.self_seed_neighbor_floor,
+            user_id=req.user_id,
+        )
+        combined = _merge_graphs(combined, extra)
+        log.info(
+            "summarize:pass2_merged nodes=%d edges=%d",
+            len(combined.nodes),
+            len(combined.edges),
+        )
+    else:
+        log.info("summarize:pass2_skipped no_retrieval_seed_ids")
+
+    final_md = combined.to_markdown(req.seed_ids)
+    if question_query_mode:
+        final_prompt = (
+            "Improve this draft using the enriched graph. Return sections:\n"
+            "Answer:\nEvidence:\nGaps:\n"
+            "Preserve factual accuracy and avoid filler.\n\n"
+            f"Draft Summary:\n{(draft_summary or '').strip()}\n\n"
+            f"Enriched Graph:\n{final_md}"
+        )
+    else:
+        final_prompt = (
+            "Improve and expand this draft using the enriched graph. Return sections:\n"
+            "Response:\nEvidence:\nGaps:\n"
+            "Preserve factual accuracy and avoid filler.\n\n"
+            f"Draft Summary:\n{(draft_summary or '').strip()}\n\n"
+            f"Enriched Graph:\n{final_md}"
+        )
+    final_summary = await llm.dispatch(
+        LLMRequest(system_prompt=system, user_prompt=final_prompt, max_tokens=2048)
+    )
+    final_summary_text = (final_summary or "").strip()
+    if len(final_summary_text) < 100:
+        if question_query_mode:
+            retry_prompt = (
+                "The previous answer was too brief. Rewrite with sections:\n"
+                "Answer:\nEvidence:\nGaps:\n"
+                "Use concrete supporting facts from the graph and explicitly note unknowns.\n\n"
+                f"Query: {q}\n\n"
+                f"Graph:\n{final_md}"
+            )
+        else:
+            retry_prompt = (
+                "The previous response was too brief. Rewrite as a compact markdown query-resolution brief "
+                "with sections Response, Evidence, and Gaps.\n\n"
+                f"Query: {q}\n\n"
+                f"Graph:\n{final_md}"
+            )
+        final_summary = await llm.dispatch(
+            LLMRequest(system_prompt=system, user_prompt=retry_prompt, max_tokens=2048)
+        )
+        final_summary_text = (final_summary or "").strip()
+    log.info(
+        "summarize:done final_nodes=%d final_edges=%d summary_chars=%d",
+        len(combined.nodes),
+        len(combined.edges),
+        len(final_summary_text),
+    )
+    debug_reasoning = None
+    if req.debug:
+        debug_reasoning = {
+            "query": q,
+            "broad_query_mode": broad_query_mode,
+            "question_query_mode": question_query_mode,
+            "seed_ids": req.seed_ids,
+            "target_queries": target_queries,
+            "retrieval_seed_ids": retrieval_seed_ids,
+            "pass1": {
+                "nodes": len(expanded.nodes),
+                "edges": len(expanded.edges),
+                "draft_summary_chars": len((draft_summary or "").strip()),
+                "thought_response": (thought or "").strip(),
+            },
+            "pass2": {
+                "performed": pass2_performed,
+                "expanded_target_count": len(retrieval_seed_ids),
+                "nodes": len(combined.nodes),
+                "edges": len(combined.edges),
+            },
+            "final": {
+                "summary_chars": len(final_summary_text),
+            },
+        }
+
+    return GraphSummarizeResponse(
+        summary=final_summary_text,
+        debug_reasoning=debug_reasoning,
+    )

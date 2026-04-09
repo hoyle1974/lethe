@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from lethe.graph.ingest import _looks_like_generated_id, _looks_like_placeholder_term, _resolve_term
+from lethe.graph.ensure_node import stable_self_id
 
 
 def _config():
@@ -36,6 +37,20 @@ async def test_resolve_term_passes_through_human_text():
 
     resolved = await _resolve_term(db, cfg, "Jamie", "person")
     assert resolved == {"text": "Jamie", "existing_uuid": None, "resolved_type": None}
+
+
+@pytest.mark.asyncio
+async def test_resolve_term_maps_self_token_to_stable_uuid():
+    cfg = _config()
+    db = MagicMock()
+
+    resolved = await _resolve_term(db, cfg, "SELF", "person", user_id="alex_reed_2026")
+    assert resolved == {
+        "text": "Me",
+        "existing_uuid": stable_self_id("alex_reed_2026"),
+        "resolved_type": "person",
+        "self_token": True,
+    }
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 import pytest
 from lethe.graph.ensure_node import (
     stable_entity_doc_id,
+    stable_self_id,
     stable_rel_id,
     normalized_predicate,
     _looks_like_entity_doc_id,
@@ -18,6 +19,19 @@ def test_stable_entity_doc_id_different_types():
     person_id = stable_entity_doc_id("person", "Acme")
     project_id = stable_entity_doc_id("project", "Acme")
     assert person_id != project_id
+
+
+def test_stable_self_id_deterministic_per_user():
+    id1 = stable_self_id("alex_reed_2026")
+    id2 = stable_self_id("alex_reed_2026")
+    assert id1 == id2
+    assert id1.startswith("entity_")
+
+
+def test_stable_self_id_differs_across_users():
+    alex = stable_self_id("alex_reed_2026")
+    jamie = stable_self_id("jamie_2026")
+    assert alex != jamie
 
 
 def test_stable_rel_id_deterministic():

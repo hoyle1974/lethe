@@ -22,12 +22,11 @@ Subject | Predicate | Object | SubjectType | ObjectType
    prefix it with NEW: (e.g. NEW:mentors, NEW:has_child, NEW:owns_pet).
 5. EXTRACT ALL: Extract every distinct relationship in the text. Do not stop early.
    Output up to 15 triples. If no relationships exist, output: status: none
-6. NO PRONOUNS: Never use I, me, my, we, us, you, your as Subject or Object.
+6. NO PRONOUNS: Never use I, me, my, we, us, you, your as Subject or Object. Replace any first-person pronoun referring to the user with the reserved token SELF.
 7. NO INTERNAL IDS: Never output internal IDs as Subject/Object (e.g. entity_<hex>, rel_<hex>, UUIDs). Use human-readable entity names from the text.
 8. NO PLACEHOLDERS: Never output placeholder/type labels as entity names (e.g. "generic", "person", "asset", "event", "tool"). Subject/Object must be concrete names or phrases from the text.
-{% if owner_name %}
-9. OWNER: Replace any first-person pronoun referring to the user with "{{ owner_name }}".
-{% endif %}
+9. OWNER: If owner_name is provided, treat it as a synonym of SELF when interpreting first-person references.
+10. IDENTITY: If the text explicitly mentions the user's name (e.g., "My name is Alex"), extract the triple: SELF | is_a | Alex | person | person.
 
 Example — for "Alice and Bob have a dog named Rex and a cat named Mittens":
 status: ok

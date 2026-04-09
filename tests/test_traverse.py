@@ -3,7 +3,12 @@ import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from lethe.graph.traverse import _is_alive, prune_frontier_by_similarity, _fetch_nodes_by_ids
+from lethe.graph.traverse import (
+    _is_alive,
+    prune_frontier_by_similarity,
+    _fetch_nodes_by_ids,
+    apply_self_seed_neighbor_floor,
+)
 from lethe.models.node import Node
 
 
@@ -48,6 +53,50 @@ def test_prune_frontier_fewer_than_k():
     nodes = [_node("a", [1.0, 0.0])]
     pruned = prune_frontier_by_similarity(nodes, [1.0, 0.0], top_k=5)
     assert len(pruned) == 1
+
+
+def test_prune_frontier_weighted_score_prioritizes_observation_density():
+    query = [1.0, 0.0]
+    semantically_best = _node("sem", [1.0, 0.0])
+    semantically_best.journal_entry_ids = []
+    reinforced = _node("reinforced", [0.6, 0.8])  # cosine similarity 0.6
+    reinforced.journal_entry_ids = ["j1", "j2", "j3", "j4", "j5"]
+    pruned = prune_frontier_by_similarity([semantically_best, reinforced], query, top_k=1)
+    assert [n.uuid for n in pruned] == ["reinforced"]
+
+
+def test_apply_self_seed_neighbor_floor_expands_first_hop_from_self():
+    pruned = [_node("keep-1", [1.0, 0.0])]
+    self_neighbors = [
+        _node("self-rel-1", [0.9, 0.1]),
+        _node("self-rel-2", [0.8, 0.2]),
+    ]
+    result = apply_self_seed_neighbor_floor(
+        pruned=pruned,
+        self_neighbors=self_neighbors,
+        query_vector=[1.0, 0.0],
+        floor=2,
+        hop_idx=0,
+        self_in_frontier=True,
+    )
+    uuids = [n.uuid for n in result]
+    assert "keep-1" in uuids
+    assert "self-rel-1" in uuids
+    assert "self-rel-2" in uuids
+
+
+def test_apply_self_seed_neighbor_floor_noop_when_not_first_hop():
+    pruned = [_node("keep-1", [1.0, 0.0])]
+    self_neighbors = [_node("self-rel-1", [0.9, 0.1])]
+    result = apply_self_seed_neighbor_floor(
+        pruned=pruned,
+        self_neighbors=self_neighbors,
+        query_vector=[1.0, 0.0],
+        floor=2,
+        hop_idx=1,
+        self_in_frontier=True,
+    )
+    assert [n.uuid for n in result] == ["keep-1"]
 
 
 # --- _fetch_nodes_by_ids uses async for, not await ---

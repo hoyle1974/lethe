@@ -65,7 +65,9 @@ class GraphExpandRequest(BaseModel):
     seed_ids: list[str]
     query: Optional[str] = None
     hops: int = 2
-    limit_per_edge: int = 5
+    limit_per_edge: int = 20
+    self_seed_neighbor_floor: int = 40
+    debug: bool = True
     user_id: str = "global"
 
 
@@ -77,7 +79,17 @@ class GraphExpandResponse(BaseModel):
         lines = ["## Knowledge Graph\n"]
         for uuid, node in self.nodes.items():
             marker = " [SEED]" if uuid in seed_ids else ""
-            lines.append(f"- **{node.node_type}** `{uuid[:8]}`{marker}: {node.content}")
+            lines.append(
+                f"- **{node.node_type}** `{uuid[:8]}`{marker}: {node.content} "
+                f"(metadata={node.metadata})"
+            )
+            if node.journal_entry_ids:
+                for log_id in reversed(node.journal_entry_ids):
+                    log_node = self.nodes.get(log_id)
+                    if log_node and log_node.node_type == "log":
+                        snippet = (log_node.content or "")[:150]
+                        lines.append(f"  - Source Snippet: {snippet}")
+                        break
         lines.append("\n## Relationships\n")
         for edge in self.edges:
             subj = self.nodes.get(edge.subject)
@@ -90,3 +102,4 @@ class GraphExpandResponse(BaseModel):
 
 class GraphSummarizeResponse(BaseModel):
     summary: str
+    debug_reasoning: Optional[dict] = None

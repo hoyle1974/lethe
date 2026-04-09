@@ -26,6 +26,13 @@ def stable_entity_doc_id(node_type: str, name: str) -> str:
     return "entity_" + digest
 
 
+def stable_self_id(user_id: str) -> str:
+    """Return a deterministic ID for the account owner."""
+    key = f"self:{user_id}"
+    digest = hashlib.sha1(key.encode()).hexdigest()
+    return f"entity_{digest}"
+
+
 def stable_rel_id(subject_id: str, predicate: str, object_id: str) -> str:
     key = subject_id + ":" + predicate + ":" + object_id
     digest = hashlib.sha1(key.encode()).hexdigest()
@@ -128,6 +135,41 @@ async def ensure_node(
         raise ValueError("ensure_node: empty identifier")
 
     collection = db.collection(config.lethe_collection)
+
+    if clean.upper() == "SELF":
+        clean = "Me"
+        doc_id = stable_self_id(user_id)
+        ref = collection.document(doc_id)
+        ts = timestamp or _now_iso()
+        snap = await ref.get()
+        if snap.exists:
+            data = snap.to_dict() or {}
+            if source_entry_id:
+                await ref.update({
+                    "journal_entry_ids": ArrayUnion([source_entry_id]),
+                    "updated_at": ts,
+                })
+                data["journal_entry_ids"] = list(set(list(data.get("journal_entry_ids", [])) + [source_entry_id]))
+                data["updated_at"] = ts
+            return _doc_to_node(doc_id, data)
+
+        vector = await embedder.embed(clean, "RETRIEVAL_DOCUMENT")
+        node_data = {
+            "node_type": "person",
+            "content": clean,
+            "name_key": clean.lower(),
+            "domain": "entity",
+            "weight": 0.55,
+            "metadata": "{}",
+            "entity_links": [],
+            "journal_entry_ids": [source_entry_id] if source_entry_id else [],
+            "embedding": Vector(vector),
+            "user_id": user_id,
+            "created_at": ts,
+            "updated_at": ts,
+        }
+        await ref.set(node_data, merge=False)
+        return _doc_to_node(doc_id, node_data)
 
     # Strict internal-ID path: only reuse existing entity docs; never create from ID-like text.
     if _looks_like_entity_doc_id(clean):

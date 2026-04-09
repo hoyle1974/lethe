@@ -12,6 +12,7 @@ source "$REPO_ROOT/scripts/lib/env-confirm.sh"
 _INSTANCE_ARG="$1"
 require_env_and_confirm "$1"
 export LETHE_SKIP_CONFIRM=1
+TEST_USER_ID="alex_reed_2026"
 [[ $# -gt 0 ]] && shift || true
 
 echo "Target: $ENV_TARGET"
@@ -21,9 +22,9 @@ echo "Target: $ENV_TARGET"
 # makes ingest.sh fall back to the default .env file.
 ingest() {
   if [[ -n "$_INSTANCE_ARG" ]]; then
-    ./scripts/ingest.sh --instance="$_INSTANCE_ARG" "$@"
+    ./scripts/ingest.sh --instance="$_INSTANCE_ARG" --user-id="$TEST_USER_ID" "$@"
   else
-    ./scripts/ingest.sh "$@"
+    ./scripts/ingest.sh --user-id="$TEST_USER_ID" "$@"
   fi
 }
 
