@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import logging
 import math
 from typing import Optional
 
@@ -9,6 +10,8 @@ from lethe.config import Config
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector, DistanceMeasure, FieldFilter
 from lethe.models.node import Node
+
+log = logging.getLogger(__name__)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -107,8 +110,10 @@ async def vector_search(
         async for doc in vq.stream():
             data = doc.to_dict() or {}
             results.append(doc_to_node(doc.id, data))
+        log.info("vector_search: %d results for user_id=%s", len(results), user_id)
         return results
-    except Exception:
+    except Exception as e:
+        log.warning("vector_search failed: %s", e)
         return []
 
 
@@ -143,8 +148,9 @@ async def keyword_search(
             results.append(doc_to_node(doc.id, data))
             if len(results) >= limit:
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("keyword_search failed: %s", e)
+    log.info("keyword_search: %d results for user_id=%s query=%r", len(results), user_id, keywords)
     return results
 
 
@@ -167,4 +173,7 @@ async def hybrid_search(
     fused = rrf_fuse(vec_results, kw_results, k=config.lethe_rrf_k)
     if min_significance > 0.0:
         fused = [n for n in fused if n.weight >= min_significance]
-    return fused[:limit]
+    result = fused[:limit]
+    log.info("hybrid_search: query=%r vec=%d kw=%d fused=%d returned=%d",
+             query, len(vec_results), len(kw_results), len(fused), len(result))
+    return result
