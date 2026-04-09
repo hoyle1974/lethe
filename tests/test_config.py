@@ -23,4 +23,4 @@ def test_config_missing_project():
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(Exception):
             from lethe.config import Config
-            Config()
+            Config(_env_file=None)
