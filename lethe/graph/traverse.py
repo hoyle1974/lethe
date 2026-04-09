@@ -115,12 +115,14 @@ async def graph_expand(
     all_nodes: dict[str, Node] = {}
     all_edges: list[Edge] = []
 
-    # Seed fetch
+    # Seed fetch — exclude log entries from graph
     seed_nodes = await _fetch_nodes_by_ids(db, config, seed_ids)
-    all_nodes.update(seed_nodes)
     visited.update(seed_ids)
+    for node in seed_nodes.values():
+        if node.node_type != "log":
+            all_nodes[node.uuid] = node
 
-    frontier = list(seed_nodes.values())
+    frontier = [n for n in seed_nodes.values() if n.node_type != "log"]
 
     for _hop in range(hops):
         if not frontier:
@@ -154,8 +156,14 @@ async def graph_expand(
             break
 
         candidates = await _fetch_nodes_by_ids(db, config, list(next_ids))
-        candidate_list = list(candidates.values())
-        pruned = prune_frontier_by_similarity(candidate_list, query_vector, limit_per_edge)
+        # Never include log entries in the graph — mark them visited so we
+        # don't follow their links, but don't add them to all_nodes.
+        non_log = [n for n in candidates.values() if n.node_type != "log"]
+        for n in candidates.values():
+            if n.node_type == "log":
+                visited.add(n.uuid)
+
+        pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)
 
         for node in pruned:
             if node.uuid not in visited:
