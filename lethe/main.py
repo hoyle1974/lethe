@@ -9,6 +9,8 @@ from lethe.routers import admin
 from lethe.routers import ingest as ingest_router
 from lethe.routers import search as search_router
 from lethe.routers import graph as graph_router
+from lethe.routers import nodes as nodes_router
+from lethe.routers import entries as entries_router
 
 
 @asynccontextmanager
@@ -29,3 +31,5 @@ app.include_router(admin.router)
 app.include_router(ingest_router.router)
 app.include_router(search_router.router)
 app.include_router(graph_router.router)
+app.include_router(nodes_router.router)
+app.include_router(entries_router.router)

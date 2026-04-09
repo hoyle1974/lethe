@@ -57,3 +57,25 @@ def _async_iter(items):
         for item in items:
             yield item
     return _gen()
+
+
+def test_get_node_not_found(mock_embedder, mock_llm):
+    mock_snap = AsyncMock()
+    mock_snap.exists = False
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value.get = AsyncMock(return_value=mock_snap)
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.get("/v1/nodes/nonexistent-uuid")
+    assert resp.status_code == 404
+
+
+def test_get_node_types(mock_embedder, mock_llm):
+    mock_db = MagicMock()
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.get("/v1/node-types")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "node_types" in data
+    assert "allowed_predicates" in data
+    assert "generic" in data["node_types"]
