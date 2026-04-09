@@ -13,12 +13,26 @@ set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/env-confirm.sh"
 
-# Parse --instance= before confirm (everything else parsed after)
+# Parse --instance before confirm (everything else parsed after)
 INSTANCE=""
-for arg in "$@"; do
+args=("$@")
+idx=0
+while [ "$idx" -lt "${#args[@]}" ]; do
+  arg="${args[$idx]}"
   case "$arg" in
-    --instance=*) INSTANCE="${arg#*=}" ;;
+    --instance=*)
+      INSTANCE="${arg#*=}"
+      ;;
+    --instance)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: --instance requires a value"
+        exit 1
+      fi
+      INSTANCE="${args[$idx]}"
+      ;;
   esac
+  idx=$((idx + 1))
 done
 
 require_env_and_confirm "$INSTANCE"
@@ -34,18 +48,69 @@ DEPTH=2
 LIMIT=10
 LIMIT_PER_EDGE=5
 USER_ID="global"
-QUERY=""
+QUERY_PARTS=()
 
-for arg in "$@"; do
+idx=0
+while [ "$idx" -lt "${#args[@]}" ]; do
+  arg="${args[$idx]}"
   case "$arg" in
-    --instance=*)      ;;  # already handled
-    -depth=*)          DEPTH="${arg#*=}" ;;
-    -limit=*)          LIMIT="${arg#*=}" ;;
-    -limit-per-edge=*) LIMIT_PER_EDGE="${arg#*=}" ;;
-    -user-id=*)        USER_ID="${arg#*=}" ;;
-    *)                 QUERY="$arg" ;;
+    --instance=*|--instance)
+      if [ "$arg" = "--instance" ]; then
+        idx=$((idx + 1))
+      fi
+      ;;
+    -depth=*|--depth=*)
+      DEPTH="${arg#*=}"
+      ;;
+    -depth|--depth)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      DEPTH="${args[$idx]}"
+      ;;
+    -limit=*)
+      LIMIT="${arg#*=}"
+      ;;
+    -limit|--limit)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      LIMIT="${args[$idx]}"
+      ;;
+    -limit-per-edge=*|--limit-per-edge=*)
+      LIMIT_PER_EDGE="${arg#*=}"
+      ;;
+    -limit-per-edge|--limit-per-edge)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      LIMIT_PER_EDGE="${args[$idx]}"
+      ;;
+    -user-id=*|--user-id=*)
+      USER_ID="${arg#*=}"
+      ;;
+    -user-id|--user-id)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      USER_ID="${args[$idx]}"
+      ;;
+    *)
+      QUERY_PARTS+=("$arg")
+      ;;
   esac
+  idx=$((idx + 1))
 done
+
+QUERY="${QUERY_PARTS[*]}"
 
 if [ -z "$QUERY" ]; then
   echo "Usage: $0 [--instance=X] [-depth=N] [-limit=N] [-limit-per-edge=N] [-user-id=X] <query>"

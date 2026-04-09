@@ -14,12 +14,26 @@ set -e
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/env-confirm.sh"
 
-# Parse --instance= before confirm
+# Parse --instance before confirm
 INSTANCE=""
-for arg in "$@"; do
+args=("$@")
+idx=0
+while [ "$idx" -lt "${#args[@]}" ]; do
+  arg="${args[$idx]}"
   case "$arg" in
-    --instance=*) INSTANCE="${arg#*=}" ;;
+    --instance=*)
+      INSTANCE="${arg#*=}"
+      ;;
+    --instance)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: --instance requires a value"
+        exit 1
+      fi
+      INSTANCE="${args[$idx]}"
+      ;;
   esac
+  idx=$((idx + 1))
 done
 
 require_env_and_confirm "$INSTANCE"
@@ -34,17 +48,58 @@ SERVICE_NAME="lethe-api"
 DOMAIN=""
 USER_ID="global"
 SOURCE=""
-TEXT=""
+TEXT_PARTS=()
 
-for arg in "$@"; do
+idx=0
+while [ "$idx" -lt "${#args[@]}" ]; do
+  arg="${args[$idx]}"
   case "$arg" in
-    --instance=*) ;;  # already handled
-    -domain=*)    DOMAIN="${arg#*=}" ;;
-    -user-id=*)   USER_ID="${arg#*=}" ;;
-    -source=*)    SOURCE="${arg#*=}" ;;
-    *)            TEXT="$arg" ;;
+    --instance=*|--instance)
+      if [ "$arg" = "--instance" ]; then
+        idx=$((idx + 1))
+      fi
+      ;;
+    -domain=*|--domain=*)
+      DOMAIN="${arg#*=}"
+      ;;
+    -domain|--domain)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      DOMAIN="${args[$idx]}"
+      ;;
+    -user-id=*|--user-id=*)
+      USER_ID="${arg#*=}"
+      ;;
+    -user-id|--user-id)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      USER_ID="${args[$idx]}"
+      ;;
+    -source=*|--source=*)
+      SOURCE="${arg#*=}"
+      ;;
+    -source|--source)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      SOURCE="${args[$idx]}"
+      ;;
+    *)
+      TEXT_PARTS+=("$arg")
+      ;;
   esac
+  idx=$((idx + 1))
 done
+
+TEXT="${TEXT_PARTS[*]}"
 
 if [ -z "$TEXT" ]; then
   echo "Usage: $0 [instance] [-domain=X] [-user-id=X] [-source=X] <text>"
