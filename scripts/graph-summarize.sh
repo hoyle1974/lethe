@@ -47,7 +47,7 @@ SERVICE_NAME="lethe-api"
 DEPTH=2
 LIMIT=10
 LIMIT_PER_EDGE=20
-USER_ID="global"
+USER_ID="alex_reed_2026"
 SEEDS_ARG=""
 QUERY_PARTS=()
 

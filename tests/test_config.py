@@ -15,7 +15,6 @@ def test_config_defaults():
         assert cfg.lethe_similarity_threshold == 0.25
         assert cfg.lethe_entity_threshold == 0.15
         assert cfg.lethe_region == "us-central1"
-        assert cfg.lethe_max_hot_edges == 20
 
 
 def test_config_missing_project():

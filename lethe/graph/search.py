@@ -8,8 +8,6 @@ from google.cloud import firestore
 
 from lethe.config import Config
 from lethe.constants import (
-    DEFAULT_DOMAIN,
-    DEFAULT_NODE_TYPE,
     DEFAULT_USER_ID,
     EMBEDDING_TASK_RETRIEVAL_QUERY,
     LOG_NODE_HALF_LIFE_DAYS,
@@ -18,6 +16,7 @@ from lethe.constants import (
     NODE_TYPE_RELATIONSHIP,
     STRUCTURED_NODE_HALF_LIFE_DAYS,
 )
+from lethe.graph.ensure_node import doc_to_node, parse_to_utc
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector, DistanceMeasure, FieldFilter
 from lethe.models.node import Node
@@ -36,32 +35,6 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if mag_a == 0.0 or mag_b == 0.0:
         return 0.0
     return dot / (mag_a * mag_b)
-
-
-def parse_to_utc(value: object) -> Optional[datetime]:
-    """Normalize Firestore / ISO timestamps to timezone-aware UTC."""
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    if isinstance(value, str):
-        try:
-            s = value.replace("Z", "+00:00")
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-        except ValueError:
-            return None
-    ts_fn = getattr(value, "timestamp", None)
-    if callable(ts_fn):
-        try:
-            return datetime.fromtimestamp(float(ts_fn()), tz=timezone.utc)
-        except (TypeError, OSError, ValueError):
-            pass
-    return None
 
 
 def half_life_days_for_node_type(node_type: str) -> float:
@@ -93,39 +66,6 @@ def effective_distance_decay(
         return raw_distance
     return raw_distance / denom
 
-
-def doc_to_node(doc_id: str, data: dict) -> Node:
-    data.pop("vector_distance", None)
-    updated_at = parse_to_utc(data.get("updated_at"))
-    created_at = parse_to_utc(data.get("created_at"))
-    embedding = None
-    raw = data.get("embedding")
-    if raw is not None:
-        try:
-            embedding = list(raw)
-        except TypeError:
-            pass
-    return Node(
-        uuid=doc_id,
-        node_type=data.get("node_type", DEFAULT_NODE_TYPE),
-        content=data.get("content", ""),
-        domain=data.get("domain", DEFAULT_DOMAIN),
-        weight=float(data.get("weight", data.get("significance_weight", 0.5))),
-        metadata=data.get("metadata", "{}"),
-        entity_links=list(data.get("entity_links", [])),
-        predicate=data.get("predicate"),
-        object_uuid=data.get("object_uuid"),
-        subject_uuid=data.get("subject_uuid"),
-        journal_entry_ids=list(data.get("journal_entry_ids", [])),
-        name_key=data.get("name_key"),
-        hot_edges=list(data.get("hot_edges", [])),
-        relevance_score=data.get("relevance_score"),
-        user_id=data.get("user_id", DEFAULT_USER_ID),
-        source=data.get("source"),
-        created_at=created_at,
-        updated_at=updated_at,
-        embedding=embedding,
-    )
 
 
 async def vector_search(

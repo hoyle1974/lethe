@@ -22,7 +22,7 @@ from lethe.constants import (
 )
 from lethe.graph.canonical_map import CanonicalMap, append_predicate
 from lethe.graph.ensure_node import (
-    ensure_node, create_relationship_node, add_entity_link, update_hot_edges,
+    ensure_node, create_relationship_node, add_entity_link,
     stable_entity_doc_id, stable_self_id,
 )
 from lethe.graph.extraction import extract_triples, RefineryTriple
@@ -195,7 +195,6 @@ async def _process_triple(
     await add_entity_link(db, config, subj_node.uuid, rel_id)
     await add_entity_link(db, config, obj_node.uuid, rel_id)
     await add_entity_link(db, config, entry_uuid, rel_id)
-    await update_hot_edges(db, config, obj_node.uuid, rel_id)
     return "ok"
 
 
@@ -308,7 +307,6 @@ async def _get_or_create_entity_node(
             subject_uuid=data.get("subject_uuid"),
             journal_entry_ids=list(data.get("journal_entry_ids", [])),
             name_key=data.get("name_key"),
-            hot_edges=list(data.get("hot_edges", [])),
             relevance_score=data.get("relevance_score"),
             user_id=data.get("user_id", user_id),
             source=data.get("source"),

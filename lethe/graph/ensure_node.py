@@ -28,6 +28,32 @@ from lethe.models.node import Node
 
 log = logging.getLogger(__name__)
 
+
+def parse_to_utc(value: object) -> Optional[datetime]:
+    """Normalize Firestore / ISO timestamps to timezone-aware UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        try:
+            s = value.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except ValueError:
+            return None
+    ts_fn = getattr(value, "timestamp", None)
+    if callable(ts_fn):
+        try:
+            return datetime.fromtimestamp(float(ts_fn()), tz=timezone.utc)
+        except (TypeError, OSError, ValueError):
+            pass
+    return None
+
 _ENTITY_DOC_ID_RE = re.compile(r"^entity_[0-9a-f]{40}$", re.IGNORECASE)
 
 
@@ -58,15 +84,12 @@ def normalized_predicate(raw: str) -> str:
     return re.sub(r"[\s\-]+", "_", p).lower()
 
 
-def _new_uuid() -> str:
-    return str(_uuid.uuid4())
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _doc_to_node(doc_id: str, data: dict) -> Node:
+def doc_to_node(doc_id: str, data: dict) -> Node:
+    data.pop("vector_distance", None)
     embedding = None
     raw_emb = data.get("embedding")
     if raw_emb is not None:
@@ -87,10 +110,11 @@ def _doc_to_node(doc_id: str, data: dict) -> Node:
         subject_uuid=data.get("subject_uuid"),
         journal_entry_ids=list(data.get("journal_entry_ids", [])),
         name_key=data.get("name_key"),
-        hot_edges=list(data.get("hot_edges", [])),
         relevance_score=data.get("relevance_score"),
         user_id=data.get("user_id", DEFAULT_USER_ID),
         source=data.get("source"),
+        created_at=parse_to_utc(data.get("created_at")),
+        updated_at=parse_to_utc(data.get("updated_at")),
         embedding=embedding,
     )
 
@@ -103,20 +127,22 @@ async def _find_nearest_by_type(
 ) -> Optional[Node]:
     """Vector ANN search restricted to node_type, returning nearest match within threshold."""
     try:
-        query = collection.find_nearest(
-            vector_field="embedding",
-            query_vector=Vector(vector),
-            distance_measure=DistanceMeasure.COSINE,
-            limit=5,
-            distance_result_field="vector_distance",
+        query = (
+            collection
+            .where(filter=FieldFilter("node_type", "==", node_type))
+            .find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(vector),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=5,
+                distance_result_field="vector_distance",
+            )
         )
         async for doc in query.stream():
             data = doc.to_dict() or {}
             dist = data.pop("vector_distance", 1.0)
-            if data.get("node_type") != node_type:
-                continue
             if float(dist) <= threshold:
-                return _doc_to_node(doc.id, data)
+                return doc_to_node(doc.id, data)
     except Exception:
         pass
     return None
@@ -162,7 +188,7 @@ async def ensure_node(
                 })
                 data["journal_entry_ids"] = list(set(list(data.get("journal_entry_ids", [])) + [source_entry_id]))
                 data["updated_at"] = ts
-            return _doc_to_node(doc_id, data)
+            return doc_to_node(doc_id, data)
 
         vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
         node_data = {
@@ -180,7 +206,7 @@ async def ensure_node(
             "updated_at": ts,
         }
         await ref.set(node_data, merge=False)
-        return _doc_to_node(doc_id, node_data)
+        return doc_to_node(doc_id, node_data)
 
     # Strict internal-ID path: only reuse existing entity docs; never create from ID-like text.
     if _looks_like_entity_doc_id(clean):
@@ -194,7 +220,7 @@ async def ensure_node(
                 "journal_entry_ids": ArrayUnion([source_entry_id]),
                 "updated_at": timestamp or _now_iso(),
             })
-        return _doc_to_node(clean, existing)
+        return doc_to_node(clean, existing)
 
     vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
 
@@ -243,7 +269,7 @@ async def ensure_node(
                     "journal_entry_ids": ArrayUnion([source_entry_id]),
                     "updated_at": ts,
                 })
-            return _doc_to_node(existing_doc.id, existing_data)
+            return doc_to_node(existing_doc.id, existing_data)
     except Exception:
         pass
 
@@ -274,9 +300,9 @@ async def ensure_node(
                     "journal_entry_ids": ArrayUnion([source_entry_id]),
                     "updated_at": ts,
                 })
-            return _doc_to_node(doc_id, data)
+            return doc_to_node(doc_id, data)
         transaction.set(ref, node_data)
-        return _doc_to_node(doc_id, node_data)
+        return doc_to_node(doc_id, node_data)
 
     return await _txn_create_or_get(db.transaction())
 
@@ -294,46 +320,6 @@ async def add_entity_link(
     ref = db.collection(config.lethe_collection).document(node_uuid)
     await ref.update({"entity_links": ArrayUnion([link_uuid])})
 
-
-async def update_hot_edges(
-    db: firestore.AsyncClient,
-    config: Config,
-    object_node_id: str,
-    new_rel_id: str,
-) -> None:
-    """Maintain a bounded hot_edges array; evict lowest relevance_score when full."""
-    col = db.collection(config.lethe_collection)
-    try:
-        await col.document(new_rel_id).update({"relevance_score": 1.0})
-    except Exception:
-        pass
-
-    try:
-        obj_snap = await col.document(object_node_id).get()
-        if not obj_snap.exists:
-            return
-        data = obj_snap.to_dict() or {}
-        hot_edges: list[str] = list(data.get("hot_edges", []))
-
-        if len(hot_edges) < config.lethe_max_hot_edges:
-            hot_edges.append(new_rel_id)
-            await col.document(object_node_id).update({"hot_edges": hot_edges})
-            return
-
-        # Evict lowest relevance_score — batch-fetch all edge docs in one round-trip
-        refs = [col.document(eid) for eid in hot_edges]
-        scores: list[tuple[str, float]] = []
-        id_to_score: dict[str, float] = {}
-        async for snap in db.get_all(refs):
-            score = (snap.to_dict() or {}).get("relevance_score", 0.0) if snap.exists else 0.0
-            id_to_score[snap.id] = float(score)
-        scores = [(eid, id_to_score.get(eid, 0.0)) for eid in hot_edges]
-
-        lowest_idx = min(range(len(scores)), key=lambda i: scores[i][1])
-        hot_edges[lowest_idx] = new_rel_id
-        await col.document(object_node_id).update({"hot_edges": hot_edges})
-    except Exception:
-        pass
 
 
 async def create_relationship_node(

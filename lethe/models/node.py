@@ -19,7 +19,6 @@ class Node(BaseModel):
     subject_uuid: Optional[str] = None
     journal_entry_ids: list[str] = Field(default_factory=list)
     name_key: Optional[str] = None
-    hot_edges: list[str] = Field(default_factory=list)
     relevance_score: Optional[float] = None
     user_id: str = DEFAULT_USER_ID
     source: Optional[str] = None
@@ -91,7 +90,6 @@ class GraphExpandResponse(BaseModel):
                     if log_node and log_node.node_type == "log":
                         snippet = (log_node.content or "")[:150]
                         lines.append(f"  - Source Snippet: {snippet}")
-                        break
         lines.append("\n## Relationships\n")
         for edge in self.edges:
             subj = self.nodes.get(edge.subject)

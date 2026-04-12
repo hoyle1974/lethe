@@ -164,6 +164,20 @@ async def summarize(
             "Gaps: what is unknown or not supported by the retrieved graph.\n"
             "Do not use conversational filler."
         )
+    elif broad_query_mode:
+        system = (
+            f"You are a knowledge summarization engine. The subject is: {q}. "
+            "Using ALL graph evidence provided, write a comprehensive profile summary. "
+            "Cover every domain present in the graph: professional role, projects, tasks, "
+            "relationships, personal life, home, family, pets, plans, and any other notable details. "
+            "Do not omit topics just because they seem minor. Return markdown with sections:\n"
+            "Profile: 2-3 sentence overview.\n"
+            "Work & Projects: bullet points for professional facts, projects, tasks, deadlines.\n"
+            "Relationships: bullet points for people, roles, and connections.\n"
+            "Personal & Home: bullet points for personal life, family, pets, plans, errands.\n"
+            "Open Items: pending tasks or unresolved questions from the graph.\n"
+            "Do not use conversational filler. Be specific and complete."
+        )
     else:
         system = (
             "You are a query-resolution RAG engine. Resolve this free-form query using only graph evidence: "
@@ -265,6 +279,15 @@ async def summarize(
             f"Draft Summary:\n{(draft_summary or '').strip()}\n\n"
             f"Enriched Graph:\n{final_md}"
         )
+    elif broad_query_mode:
+        final_prompt = (
+            "Improve and expand this draft into a complete profile using the enriched graph. "
+            "Include ALL topics present: work, projects, tasks, people, personal life, home, pets, plans. "
+            "Return sections: Profile:\nWork & Projects:\nRelationships:\nPersonal & Home:\nOpen Items:\n"
+            "Preserve factual accuracy and avoid filler.\n\n"
+            f"Draft Summary:\n{(draft_summary or '').strip()}\n\n"
+            f"Enriched Graph:\n{final_md}"
+        )
     else:
         final_prompt = (
             "Improve and expand this draft using the enriched graph. Return sections:\n"
@@ -288,6 +311,14 @@ async def summarize(
                 "Answer:\nEvidence:\nGaps:\n"
                 "Use concrete supporting facts from the graph and explicitly note unknowns.\n\n"
                 f"Query: {q}\n\n"
+                f"Graph:\n{final_md}"
+            )
+        elif broad_query_mode:
+            retry_prompt = (
+                "The previous response was too brief. Write a comprehensive profile with sections "
+                "Profile, Work & Projects, Relationships, Personal & Home, and Open Items. "
+                "Include ALL topics from the graph.\n\n"
+                f"Subject: {q}\n\n"
                 f"Graph:\n{final_md}"
             )
         else:
