@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Config(BaseSettings):
     google_cloud_project: str
     lethe_collection: str = "nodes"
+    lethe_relationships_collection: str = "relationships"
     lethe_embedding_model: str = "text-embedding-005"
     lethe_llm_model: str = "gemini-2.5-flash"
     lethe_collision_detection: bool = True

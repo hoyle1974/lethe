@@ -25,3 +25,11 @@ def test_config_missing_project():
             from lethe.config import Config
 
             Config(_env_file=None)
+
+
+def test_config_relationships_collection_default():
+    with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "test-project"}, clear=True):
+        from lethe.config import Config
+
+        cfg = Config()
+        assert cfg.lethe_relationships_collection == "relationships"
