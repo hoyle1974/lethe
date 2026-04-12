@@ -17,7 +17,6 @@ from lethe.constants import (
     DEFAULT_USER_ID,
     EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     NODE_TYPE_ENTITY,
-    NODE_TYPE_RELATIONSHIP,
     RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT,
 )
 from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
@@ -384,7 +383,7 @@ async def create_relationship_node(
         raise ValueError("create_relationship_node: subject, predicate, object required")
 
     rel_id = stable_rel_id(subject_id, predicate, object_id)
-    col = db.collection(config.lethe_collection)
+    col = db.collection(config.lethe_relationships_collection)
     ref = col.document(rel_id)
     ts = timestamp or _now_iso()
 
@@ -399,7 +398,6 @@ async def create_relationship_node(
         rq = (
             col.where(filter=FieldFilter("user_id", "==", user_id))
             .where(filter=FieldFilter("subject_uuid", "==", subject_id))
-            .where(filter=FieldFilter("node_type", "==", NODE_TYPE_RELATIONSHIP))
             .order_by("updated_at", direction=firestore.Query.DESCENDING)
             .limit(RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT)
         )
@@ -417,18 +415,14 @@ async def create_relationship_node(
         superseded_id = await evaluate_relationship_supersedes(llm, content, existing_facts)
 
     create_data = {
-        "node_type": NODE_TYPE_RELATIONSHIP,
         "content": content,
         "predicate": predicate,
         "subject_uuid": subject_id,
         "object_uuid": object_id,
-        "entity_links": [subject_id, object_id],
         "journal_entry_ids": [source_entry_id] if source_entry_id else [],
-        "domain": NODE_TYPE_RELATIONSHIP,
+        "domain": DEFAULT_DOMAIN,
         "weight": DEFAULT_RELATIONSHIP_WEIGHT,
-        "metadata": "{}",
         "embedding": Vector(vector),
-        "relevance_score": 1.0,
         "user_id": user_id,
         "created_at": ts,
         "updated_at": ts,
@@ -450,5 +444,7 @@ async def create_relationship_node(
     if superseded_id and superseded_id != rid:
         candidate_ids = {u for u, _ in existing_facts}
         if superseded_id in candidate_ids:
-            await tombstone_relationship(db, config.lethe_collection, superseded_id, rid)
+            await tombstone_relationship(
+                db, config.lethe_relationships_collection, superseded_id, rid
+            )
     return rid

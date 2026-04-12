@@ -99,3 +99,18 @@ def test_doc_to_edge_strips_vector_distance():
     }
     edge = doc_to_edge("rel_x", data)
     assert edge.uuid == "rel_x"
+
+
+def test_create_relationship_node_targets_relationships_collection():
+    """create_relationship_node must use lethe_relationships_collection, not lethe_collection."""
+    import inspect
+
+    import lethe.graph.ensure_node as m
+
+    src = inspect.getsource(m.create_relationship_node)
+    assert "lethe_relationships_collection" in src, (
+        "create_relationship_node must reference config.lethe_relationships_collection"
+    )
+    # Confirm the old nodes-collection reference is gone from this function
+    fn_body = src.split("def create_relationship_node")[1]
+    assert "lethe_collection" not in fn_body
