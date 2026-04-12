@@ -134,3 +134,46 @@ async def test_fetch_nodes_by_ids_uses_async_generator():
     result = await _fetch_nodes_by_ids(mock_db, cfg, ["entity-1"])
     assert "entity-1" in result
     assert result["entity-1"].content == "Jack"
+
+
+@pytest.mark.asyncio
+async def test_get_edge_neighbors_queries_relationships_collection():
+    from unittest.mock import MagicMock
+
+    from lethe.graph.traverse import _get_edge_neighbors
+
+    cfg = _config()
+
+    rel_doc = MagicMock()
+    rel_doc.id = "rel_abc"
+    rel_doc.to_dict.return_value = {
+        "subject_uuid": "node-a",
+        "predicate": "knows",
+        "object_uuid": "node-b",
+        "content": "a knows b",
+        "weight": 0.8,
+        "domain": "general",
+        "user_id": "global",
+        "journal_entry_ids": [],
+    }
+
+    async def fake_stream():
+        yield rel_doc
+
+    mock_query = MagicMock()
+    mock_query.where.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.stream = fake_stream
+
+    mock_col = MagicMock()
+    mock_col.where.return_value = mock_query
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value = mock_col
+
+    edges = await _get_edge_neighbors(mock_db, cfg, "node-a", "global")
+
+    mock_db.collection.assert_called_with(cfg.lethe_relationships_collection)
+    assert len(edges) >= 1
+    assert edges[0].predicate == "knows"
+    assert edges[0].uuid == "rel_abc"

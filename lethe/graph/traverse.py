@@ -15,7 +15,7 @@ from lethe.constants import (
     TRAVERSE_BATCH_SIZE,
     TRAVERSE_NEIGHBOR_QUERY_LIMIT,
 )
-from lethe.graph.ensure_node import stable_self_id
+from lethe.graph.ensure_node import doc_to_edge, stable_self_id
 from lethe.graph.search import cosine_similarity, doc_to_node
 from lethe.infra.embedder import Embedder
 from lethe.models.node import Edge, GraphExpandResponse, Node
@@ -110,52 +110,43 @@ async def _fetch_nodes_by_ids(
     return result
 
 
-async def _get_incoming_spo_edges(
+async def _get_edge_neighbors(
     db: firestore.AsyncClient,
     config: Config,
     node_uuid: str,
     user_id: str,
-) -> list[str]:
-    """Return UUIDs of relationship nodes whose object_uuid == node_uuid."""
+) -> list[Edge]:
+    """Return all edges from the relationships collection where node_uuid is subject or object."""
     from lethe.infra.fs_helpers import FieldFilter
 
-    col = db.collection(config.lethe_collection)
-    q = (
-        col.where(filter=FieldFilter("object_uuid", "==", node_uuid))
-        .where(filter=FieldFilter("user_id", "==", user_id))
-        .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
+    col = db.collection(config.lethe_relationships_collection)
+
+    async def _query_field(field: str) -> list[Edge]:
+        q = (
+            col.where(filter=FieldFilter(field, "==", node_uuid))
+            .where(filter=FieldFilter("user_id", "==", user_id))
+            .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
+        )
+        edges: list[Edge] = []
+        try:
+            async for doc in q.stream():
+                data = doc.to_dict() or {}
+                edges.append(doc_to_edge(doc.id, data))
+        except Exception as e:
+            log.warning("_get_edge_neighbors(%s) failed: %s", field, e)
+        return edges
+
+    outgoing, incoming = await asyncio.gather(
+        _query_field("subject_uuid"),
+        _query_field("object_uuid"),
     )
-    ids: list[str] = []
-    try:
-        async for doc in q.stream():
-            ids.append(doc.id)
-    except Exception as e:
-        log.warning("_get_incoming_spo_edges failed: %s", e)
-    return ids
-
-
-async def _get_nodes_linking_to(
-    db: firestore.AsyncClient,
-    config: Config,
-    node_uuid: str,
-    user_id: str,
-) -> list[str]:
-    """Return UUIDs of nodes that have node_uuid in their entity_links."""
-    from lethe.infra.fs_helpers import FieldFilter
-
-    col = db.collection(config.lethe_collection)
-    q = (
-        col.where(filter=FieldFilter("entity_links", "array_contains", node_uuid))
-        .where(filter=FieldFilter("user_id", "==", user_id))
-        .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
-    )
-    ids: list[str] = []
-    try:
-        async for doc in q.stream():
-            ids.append(doc.id)
-    except Exception as e:
-        log.warning("_get_nodes_linking_to failed: %s", e)
-    return ids
+    seen: set[str] = set()
+    result: list[Edge] = []
+    for edge in outgoing + incoming:
+        if edge.uuid not in seen:
+            seen.add(edge.uuid)
+            result.append(edge)
+    return result
 
 
 async def graph_expand(
@@ -185,8 +176,8 @@ async def graph_expand(
     discovered: set[str] = set()
     all_nodes: dict[str, Node] = {}
     all_edges: list[Edge] = []
+    seen_edge_uuids: set[str] = set()
 
-    # Seed fetch — exclude log entries from graph
     seed_nodes = await _fetch_nodes_by_ids(db, config, seed_ids)
     visited.update(seed_ids)
     discovered.update(seed_ids)
@@ -215,32 +206,18 @@ async def graph_expand(
         self_in_frontier = any(node.uuid == self_seed_id for node in frontier)
 
         gather_tasks = [_gather_neighbors(db, config, node, user_id, sem) for node in frontier]
-        neighbor_lists = await asyncio.gather(*gather_tasks)
+        edge_lists = await asyncio.gather(*gather_tasks)
 
-        for node, (incoming_spo, linking_to) in zip(frontier, neighbor_lists):
-            candidate_ids = set(incoming_spo) | set(linking_to)
-
-            if node.object_uuid:
-                candidate_ids.add(node.object_uuid)
-            candidate_ids.update(node.entity_links)
-            candidate_ids -= discovered
-            next_ids.update(candidate_ids)
-            if hop_idx == 0 and node.uuid == self_seed_id:
-                self_neighbor_ids.update(candidate_ids)
-
-            if (
-                node.node_type == "relationship"
-                and node.subject_uuid
-                and node.object_uuid
-                and _is_alive(node)
-            ):
-                all_edges.append(
-                    Edge(
-                        subject=node.subject_uuid,
-                        predicate=node.predicate or "related_to",
-                        object=node.object_uuid,
-                    )
-                )
+        for node, edges in zip(frontier, edge_lists):
+            for edge in edges:
+                if edge.weight > 0.0 and edge.uuid not in seen_edge_uuids:
+                    seen_edge_uuids.add(edge.uuid)
+                    all_edges.append(edge)
+                other = edge.object_uuid if edge.subject_uuid == node.uuid else edge.subject_uuid
+                if other not in discovered:
+                    next_ids.add(other)
+                    if hop_idx == 0 and node.uuid == self_seed_id:
+                        self_neighbor_ids.add(other)
 
         if not next_ids:
             log.info("graph_expand:hop=%d no_next_ids frontier=%d", hop_idx + 1, len(frontier))
@@ -248,16 +225,13 @@ async def graph_expand(
         discovered.update(next_ids)
 
         candidates = await _fetch_nodes_by_ids(db, config, list(next_ids))
-        # Log entries: include in all_nodes as context but never put in the
-        # frontier — they don't lead to useful graph neighbours.
-        # Tombstones (weight 0): mark visited so we do not keep re-fetching them.
         for n in candidates.values():
             if not _is_alive(n):
                 visited.add(n.uuid)
                 continue
             if n.node_type == NODE_TYPE_LOG:
                 visited.add(n.uuid)
-                all_nodes[n.uuid] = n  # keep as journal context in response
+                all_nodes[n.uuid] = n
 
         non_log = [n for n in candidates.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)]
         self_neighbors = [n for n in non_log if n.uuid in self_neighbor_ids]
@@ -282,7 +256,7 @@ async def graph_expand(
             "graph_expand:hop=%d frontier_in=%d next_ids=%d candidates=%d "
             "non_log=%d pruned=%d logs=%d total_nodes=%d total_edges=%d",
             hop_idx + 1,
-            len(neighbor_lists),
+            len(edge_lists),
             len(next_ids),
             len(candidates),
             len(non_log),
@@ -302,10 +276,6 @@ async def _gather_neighbors(
     node: Node,
     user_id: str,
     sem: asyncio.Semaphore,
-) -> tuple[list[str], list[str]]:
+) -> list[Edge]:
     async with sem:
-        incoming, linking = await asyncio.gather(
-            _get_incoming_spo_edges(db, config, node.uuid, user_id),
-            _get_nodes_linking_to(db, config, node.uuid, user_id),
-        )
-    return incoming, linking
+        return await _get_edge_neighbors(db, config, node.uuid, user_id)
