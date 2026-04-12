@@ -10,5 +10,4 @@ EmbeddingTaskType: TypeAlias = Literal[
 CoreNodeType: TypeAlias = Literal[
     "log",
     "entity",
-    "relationship",
 ]

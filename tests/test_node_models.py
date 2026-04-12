@@ -14,7 +14,6 @@ def test_node_defaults():
     n = Node(uuid="abc", node_type="generic", content="hello")
     assert n.user_id == "global"
     assert n.metadata == "{}"
-    assert n.entity_links == []
     assert n.weight == 0.5
     assert n.domain == "general"
 
@@ -112,3 +111,13 @@ def test_graph_expand_to_markdown_includes_metadata_and_recent_log_snippet():
     source_line = next(line for line in md.splitlines() if "Source Snippet:" in line)
     snippet = source_line.split("Source Snippet: ", 1)[1]
     assert len(snippet) <= 150
+
+
+def test_node_has_no_spo_fields():
+    """Confirm SPO fields are no longer on Node — they belong to Edge."""
+    n = Node(uuid="x", node_type="entity", content="Alice")
+    assert not hasattr(n, "predicate"), "predicate should not be on Node"
+    assert not hasattr(n, "subject_uuid"), "subject_uuid should not be on Node"
+    assert not hasattr(n, "object_uuid"), "object_uuid should not be on Node"
+    assert not hasattr(n, "entity_links"), "entity_links should not be on Node"
+    assert not hasattr(n, "relevance_score"), "relevance_score should not be on Node"

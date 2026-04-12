@@ -15,13 +15,8 @@ class Node(BaseModel):
     domain: str = DEFAULT_DOMAIN
     weight: float = 0.5
     metadata: str = "{}"
-    entity_links: list[str] = Field(default_factory=list)
-    predicate: Optional[str] = None
-    object_uuid: Optional[str] = None
-    subject_uuid: Optional[str] = None
     journal_entry_ids: list[str] = Field(default_factory=list)
     name_key: Optional[str] = None
-    relevance_score: Optional[float] = None
     user_id: str = DEFAULT_USER_ID
     source: Optional[str] = None
     created_at: Optional[datetime] = None

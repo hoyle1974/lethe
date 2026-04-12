@@ -337,13 +337,8 @@ async def _get_or_create_entity_node(
                 data.get("weight", data.get("significance_weight", DEFAULT_ENTITY_WEIGHT))
             ),
             metadata=data.get("metadata", "{}"),
-            entity_links=list(data.get("entity_links", [])),
-            predicate=data.get("predicate"),
-            object_uuid=data.get("object_uuid"),
-            subject_uuid=data.get("subject_uuid"),
             journal_entry_ids=list(data.get("journal_entry_ids", [])),
             name_key=data.get("name_key"),
-            relevance_score=data.get("relevance_score"),
             user_id=data.get("user_id", user_id),
             source=data.get("source"),
         )
