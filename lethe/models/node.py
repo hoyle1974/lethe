@@ -75,8 +75,7 @@ class SearchResponse(BaseModel):
 
     @model_validator(mode="after")
     def _set_count(self) -> SearchResponse:
-        if self.count == 0:
-            self.count = len(self.nodes) + len(self.edges)
+        self.count = len(self.nodes) + len(self.edges)
         return self
 
 

@@ -30,4 +30,4 @@ async def search(
         limit=req.limit,
         min_significance=req.min_significance,
     )
-    return SearchResponse(nodes=nodes, edges=edges, count=len(nodes) + len(edges))
+    return SearchResponse(nodes=nodes, edges=edges)

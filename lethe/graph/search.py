@@ -196,6 +196,8 @@ async def execute_search(
         decorated_edges.append((edge, effective))
     decorated_edges.sort(key=lambda x: x[1])
     edges = [e for e, _ in decorated_edges if e.weight > 0.0]
+    if min_significance > 0.0:
+        edges = [e for e in edges if e.weight >= min_significance]
     edges = edges[:limit]
 
     log.info("execute_search: query=%r nodes=%d edges=%d", query, len(nodes), len(edges))
