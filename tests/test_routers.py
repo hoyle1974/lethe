@@ -140,7 +140,7 @@ def test_graph_summarize_runs_iterative_reasoning_loop(mock_embedder, mock_llm):
     )
     graph_expand_mock = AsyncMock(side_effect=[first_expand, second_expand])
     search_mock = AsyncMock(
-        return_value=[Node(uuid="target-1", node_type="generic", content="Acme")]
+        return_value=([Node(uuid="target-1", node_type="generic", content="Acme")], [])
     )
     llm_dispatch_mock = AsyncMock(
         side_effect=[
@@ -208,7 +208,7 @@ def test_graph_summarize_debug_mode_returns_reasoning(mock_embedder, mock_llm):
     )
     graph_expand_mock = AsyncMock(side_effect=[first_expand, second_expand])
     search_mock = AsyncMock(
-        return_value=[Node(uuid="target-1", node_type="generic", content="Acme")]
+        return_value=([Node(uuid="target-1", node_type="generic", content="Acme")], [])
     )
     llm_dispatch_mock = AsyncMock(
         side_effect=[
@@ -255,7 +255,7 @@ def test_graph_summarize_ignores_non_uuid_thought_tokens(mock_embedder, mock_llm
         edges=[],
     )
     graph_expand_mock = AsyncMock(side_effect=[first_expand])
-    search_mock = AsyncMock(return_value=[])
+    search_mock = AsyncMock(return_value=([], []))
     llm_dispatch_mock = AsyncMock(
         side_effect=[
             "Draft summary paragraph",
@@ -301,7 +301,7 @@ def test_graph_summarize_retries_when_final_summary_too_short(mock_embedder, moc
         edges=[],
     )
     graph_expand_mock = AsyncMock(side_effect=[first_expand])
-    search_mock = AsyncMock(return_value=[])
+    search_mock = AsyncMock(return_value=([], []))
     llm_dispatch_mock = AsyncMock(
         side_effect=[
             "Draft summary paragraph",
@@ -340,7 +340,7 @@ def test_graph_summarize_broad_query_disables_semantic_pruning(mock_embedder, mo
         edges=[],
     )
     graph_expand_mock = AsyncMock(side_effect=[first_expand])
-    search_mock = AsyncMock(return_value=[])
+    search_mock = AsyncMock(return_value=([], []))
     llm_dispatch_mock = AsyncMock(
         side_effect=[
             "Draft summary paragraph",
@@ -389,7 +389,7 @@ def test_graph_summarize_question_query_returns_answer_evidence_shape(mock_embed
         edges=[],
     )
     graph_expand_mock = AsyncMock(side_effect=[first_expand])
-    search_mock = AsyncMock(return_value=[])
+    search_mock = AsyncMock(return_value=([], []))
     llm_dispatch_mock = AsyncMock(
         side_effect=[
             "Answer: Alex's dog is Buster.\n\nEvidence:\n- Alex lives with Buster.",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import datetime, timezone
@@ -9,17 +10,16 @@ from google.cloud import firestore
 
 from lethe.config import Config
 from lethe.constants import (
+    EDGE_HALF_LIFE_DAYS,
     EMBEDDING_TASK_RETRIEVAL_QUERY,
     LOG_NODE_HALF_LIFE_DAYS,
-    NODE_TYPE_ENTITY,
     NODE_TYPE_LOG,
-    NODE_TYPE_RELATIONSHIP,
     STRUCTURED_NODE_HALF_LIFE_DAYS,
 )
-from lethe.graph.ensure_node import doc_to_node
+from lethe.graph.ensure_node import doc_to_edge, doc_to_node
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import DistanceMeasure, FieldFilter, Vector
-from lethe.models.node import Node
+from lethe.models.node import Edge, Node
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +40,6 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 def half_life_days_for_node_type(node_type: str) -> float:
     if node_type == NODE_TYPE_LOG:
         return LOG_NODE_HALF_LIFE_DAYS
-    if node_type in (NODE_TYPE_ENTITY, NODE_TYPE_RELATIONSHIP):
-        return STRUCTURED_NODE_HALF_LIFE_DAYS
     return STRUCTURED_NODE_HALF_LIFE_DAYS
 
 
@@ -114,6 +112,48 @@ async def vector_search(
         return []
 
 
+async def _edge_vector_search(
+    db: firestore.AsyncClient,
+    config: Config,
+    query_vector: list[float],
+    domain: Optional[str],
+    user_id: str,
+    limit: int,
+) -> list[tuple[Edge, float]]:
+    col = db.collection(config.lethe_relationships_collection)
+
+    filters = [FieldFilter("user_id", "==", user_id)]
+    if domain:
+        filters.append(FieldFilter("domain", "==", domain))
+
+    q = col
+    for f in filters:
+        q = q.where(filter=f)
+
+    try:
+        vq = q.find_nearest(
+            vector_field="embedding",
+            query_vector=Vector(query_vector),
+            distance_measure=DistanceMeasure.COSINE,
+            distance_result_field="vector_distance",
+            limit=limit,
+        )
+        results: list[tuple[Edge, float]] = []
+        async for doc in vq.stream():
+            data = doc.to_dict() or {}
+            dist_raw = data.get("vector_distance", 1.0)
+            try:
+                raw_distance = float(dist_raw)
+            except (TypeError, ValueError):
+                raw_distance = 1.0
+            results.append((doc_to_edge(doc.id, data), raw_distance))
+        log.info("_edge_vector_search: %d results for user_id=%s", len(results), user_id)
+        return results
+    except Exception as e:
+        log.warning("_edge_vector_search failed: %s", e)
+        return []
+
+
 async def execute_search(
     db: firestore.AsyncClient,
     embedder: Embedder,
@@ -124,19 +164,39 @@ async def execute_search(
     user_id: str,
     limit: int,
     min_significance: float,
-) -> list[Node]:
+) -> tuple[list[Node], list[Edge]]:
     query_vector = await embedder.embed(query, EMBEDDING_TASK_RETRIEVAL_QUERY)
     pool = min(max(limit * 5, limit), _SEARCH_POOL_MAX)
-    scored = await vector_search(db, config, query_vector, node_types, domain, user_id, pool)
+
+    node_scored, edge_scored = await asyncio.gather(
+        vector_search(db, config, query_vector, node_types, domain, user_id, pool),
+        _edge_vector_search(db, config, query_vector, domain, user_id, pool),
+    )
+
     now_utc = datetime.now(timezone.utc)
-    decorated = [
-        (node, effective_distance_decay(node, raw_distance, now_utc))
-        for node, raw_distance in scored
-    ]
-    decorated.sort(key=lambda x: x[1])
-    ordered = [n for n, _ in decorated if n.weight > 0.0]
+
+    # Rank nodes with temporal decay
+    decorated_nodes = [(n, effective_distance_decay(n, d, now_utc)) for n, d in node_scored]
+    decorated_nodes.sort(key=lambda x: x[1])
+    nodes = [n for n, _ in decorated_nodes if n.weight > 0.0]
     if min_significance > 0.0:
-        ordered = [n for n in ordered if n.weight >= min_significance]
-    result = ordered[:limit]
-    log.info("execute_search: query=%r vec=%d returned=%d", query, len(scored), len(result))
-    return result
+        nodes = [n for n in nodes if n.weight >= min_significance]
+    nodes = nodes[:limit]
+
+    # Rank edges with temporal decay using EDGE_HALF_LIFE_DAYS
+    decorated_edges: list[tuple[Edge, float]] = []
+    for edge, raw in edge_scored:
+        ref = edge.updated_at or edge.created_at
+        age_days = max(0.0, (now_utc - ref).total_seconds() / 86400.0) if ref else 0.0
+        decay = 0.5 ** (age_days / EDGE_HALF_LIFE_DAYS) if EDGE_HALF_LIFE_DAYS > 0 else 1.0
+        n_entries = min(len(edge.journal_entry_ids), _REINFORCEMENT_MAX_ENTRIES)
+        reinforcement = 1.0 + _REINFORCEMENT_ALPHA * n_entries
+        denom = decay * reinforcement
+        effective = raw / denom if denom > 0 else raw
+        decorated_edges.append((edge, effective))
+    decorated_edges.sort(key=lambda x: x[1])
+    edges = [e for e, _ in decorated_edges if e.weight > 0.0]
+    edges = edges[:limit]
+
+    log.info("execute_search: query=%r nodes=%d edges=%d", query, len(nodes), len(edges))
+    return nodes, edges

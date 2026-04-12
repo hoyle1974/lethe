@@ -19,7 +19,7 @@ async def search(
     embedder: Embedder = Depends(get_embedder),
     config: Config = Depends(get_config),
 ) -> SearchResponse:
-    nodes = await execute_search(
+    nodes, edges = await execute_search(
         db=db,
         embedder=embedder,
         config=config,
@@ -30,4 +30,4 @@ async def search(
         limit=req.limit,
         min_significance=req.min_significance,
     )
-    return SearchResponse(results=nodes, count=len(nodes))
+    return SearchResponse(nodes=nodes, edges=edges, count=len(nodes) + len(edges))

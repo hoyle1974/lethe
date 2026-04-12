@@ -241,8 +241,8 @@ async def summarize(
             ]
         )
         seen_seed_ids: set[str] = set()
-        for nodes in search_results:
-            for node in nodes:
+        for node_list, _ in search_results:
+            for node in node_list:
                 if node.uuid not in seen_seed_ids:
                     seen_seed_ids.add(node.uuid)
                     retrieval_seed_ids.append(node.uuid)

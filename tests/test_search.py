@@ -4,11 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from lethe.graph.ensure_node import doc_to_node, parse_to_utc
 from lethe.graph.search import (
     cosine_similarity,
-    doc_to_node,
     effective_distance_decay,
-    parse_to_utc,
 )
 from lethe.models.node import Node
 
@@ -129,3 +128,15 @@ def test_effective_distance_reinforcement_reduces_effective_distance():
     )
     raw = 0.3
     assert effective_distance_decay(reinforced, raw, now) < effective_distance_decay(base, raw, now)
+
+
+def test_search_response_has_nodes_and_edges_fields():
+    from lethe.models.node import Edge, SearchResponse
+
+    r = SearchResponse(
+        nodes=[Node(uuid="n1", node_type="entity", content="Alice")],
+        edges=[Edge(uuid="rel_1", subject_uuid="n1", predicate="works_at", object_uuid="n2")],
+    )
+    assert len(r.nodes) == 1
+    assert len(r.edges) == 1
+    assert r.count == 2

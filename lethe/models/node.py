@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from lethe.constants import DEFAULT_DOMAIN, DEFAULT_RELATIONSHIP_WEIGHT, DEFAULT_USER_ID
 
@@ -27,6 +27,21 @@ class Node(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     embedding: Optional[list[float]] = Field(default=None, exclude=True)
+
+
+class Edge(BaseModel):
+    uuid: str
+    subject_uuid: str
+    predicate: str
+    object_uuid: str
+    content: str = ""
+    weight: float = DEFAULT_RELATIONSHIP_WEIGHT
+    domain: str = DEFAULT_DOMAIN
+    user_id: str = DEFAULT_USER_ID
+    source: Optional[str] = None
+    journal_entry_ids: list[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class IngestRequest(BaseModel):
@@ -54,23 +69,15 @@ class SearchRequest(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    results: list[Node]
+    nodes: list[Node] = Field(default_factory=list)
+    edges: list[Edge] = Field(default_factory=list)
     count: int = 0
 
-
-class Edge(BaseModel):
-    uuid: str
-    subject_uuid: str
-    predicate: str
-    object_uuid: str
-    content: str = ""
-    weight: float = DEFAULT_RELATIONSHIP_WEIGHT
-    domain: str = DEFAULT_DOMAIN
-    user_id: str = DEFAULT_USER_ID
-    source: Optional[str] = None
-    journal_entry_ids: list[str] = Field(default_factory=list)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    @model_validator(mode="after")
+    def _set_count(self) -> SearchResponse:
+        if self.count == 0:
+            self.count = len(self.nodes) + len(self.edges)
+        return self
 
 
 class GraphExpandRequest(BaseModel):
