@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Optional
 
 from google.cloud import firestore
@@ -11,11 +9,6 @@ from lethe.constants import LLM_MAX_TOKENS_RELATIONSHIP_SUPERSEDES
 from lethe.infra.llm import LLMDispatcher, LLMRequest
 
 log = logging.getLogger(__name__)
-
-_UUID_RE = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-    re.IGNORECASE,
-)
 
 
 async def evaluate_relationship_supersedes(
@@ -46,10 +39,10 @@ async def evaluate_relationship_supersedes(
         log.warning("evaluate_relationship_supersedes LLM failed: %s", e)
         return None
     known = {uid.lower(): uid for uid, _ in existing_facts}
-    for m in _UUID_RE.finditer(text or ""):
-        cand = m.group(0).lower()
-        if cand in known:
-            return known[cand]
+    response_lower = (text or "").lower().strip()
+    for uid_lower, uid_original in known.items():
+        if uid_lower in response_lower:
+            return uid_original
     return None
 
 
@@ -63,19 +56,4 @@ async def tombstone_relationship(
     snap = await ref.get()
     if not snap.exists:
         return
-    data = snap.to_dict() or {}
-    raw_meta = data.get("metadata", "{}")
-    try:
-        meta = json.loads(raw_meta) if isinstance(raw_meta, str) else {}
-    except json.JSONDecodeError:
-        meta = {}
-    if not isinstance(meta, dict):
-        meta = {}
-    meta["deprecated_by"] = new_rel_id
-    await ref.update(
-        {
-            "weight": 0.0,
-            "relevance_score": 0.0,
-            "metadata": json.dumps(meta),
-        }
-    )
+    await ref.update({"weight": 0.0})
