@@ -229,7 +229,6 @@ async def ensure_node(
             "domain": NODE_TYPE_ENTITY,
             "weight": DEFAULT_ENTITY_WEIGHT,
             "metadata": "{}",
-            "entity_links": [],
             "journal_entry_ids": [source_entry_id] if source_entry_id else [],
             "embedding": Vector(vector),
             "user_id": user_id,
@@ -321,7 +320,6 @@ async def ensure_node(
         "domain": NODE_TYPE_ENTITY,
         "weight": DEFAULT_ENTITY_WEIGHT,
         "metadata": "{}",
-        "entity_links": [],
         "journal_entry_ids": [source_entry_id] if source_entry_id else [],
         "embedding": Vector(vector),
         "user_id": user_id,
@@ -351,16 +349,6 @@ async def ensure_node(
 
 def _looks_like_entity_doc_id(identifier: str) -> bool:
     return bool(_ENTITY_DOC_ID_RE.fullmatch(identifier.strip()))
-
-
-async def add_entity_link(
-    db: firestore.AsyncClient,
-    config: Config,
-    node_uuid: str,
-    link_uuid: str,
-) -> None:
-    ref = db.collection(config.lethe_collection).document(node_uuid)
-    await ref.update({"entity_links": ArrayUnion([link_uuid])})
 
 
 async def create_relationship_node(

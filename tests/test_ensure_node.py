@@ -101,6 +101,15 @@ def test_doc_to_edge_strips_vector_distance():
     assert edge.uuid == "rel_x"
 
 
+def test_add_entity_link_does_not_exist():
+    """add_entity_link should be gone — traversal no longer uses entity_links."""
+    import lethe.graph.ensure_node as m
+
+    assert not hasattr(m, "add_entity_link"), (
+        "add_entity_link still exists; remove it and its callers"
+    )
+
+
 def test_create_relationship_node_targets_relationships_collection():
     """create_relationship_node must use lethe_relationships_collection, not lethe_collection."""
     import inspect

@@ -20,7 +20,6 @@ from lethe.constants import (
 )
 from lethe.graph.canonical_map import CanonicalMap, append_predicate
 from lethe.graph.ensure_node import (
-    add_entity_link,
     create_relationship_node,
     ensure_node,
     stable_entity_doc_id,
@@ -76,7 +75,6 @@ async def run_ingest(
             "weight": DEFAULT_LOG_WEIGHT,
             "metadata": "{}",
             "embedding": Vector(vector),
-            "entity_links": [],
             "user_id": user_id,
             "source": source,
             "created_at": ts,
@@ -231,9 +229,6 @@ async def _process_triple(
     if rel_id not in relationships_created:
         relationships_created.append(rel_id)
 
-    await add_entity_link(db, config, subj_node.uuid, rel_id)
-    await add_entity_link(db, config, obj_node.uuid, rel_id)
-    await add_entity_link(db, config, entry_uuid, rel_id)
     return "ok"
 
 
