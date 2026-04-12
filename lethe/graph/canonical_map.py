@@ -5,7 +5,6 @@ from google.cloud import firestore
 from lethe.constants import (
     DEFAULT_NODE_TYPE,
     NODE_TYPE_LOG,
-    NODE_TYPE_RELATIONSHIP,
 )
 from lethe.infra.fs_helpers import ArrayUnion
 
@@ -22,7 +21,6 @@ DEFAULT_NODE_TYPES = [
     "asset",
     "tool",
     DEFAULT_NODE_TYPE,
-    NODE_TYPE_RELATIONSHIP,
     NODE_TYPE_LOG,
 ]
 

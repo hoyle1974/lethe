@@ -241,7 +241,10 @@ async def summarize(
             ]
         )
         seen_seed_ids: set[str] = set()
-        for node_list, _ in search_results:
+        for (
+            node_list,
+            _edges,
+        ) in search_results:  # edges discarded; BFS expansion finds them via traversal
             for node in node_list:
                 if node.uuid not in seen_seed_ids:
                     seen_seed_ids.add(node.uuid)
