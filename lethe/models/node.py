@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from lethe.constants import DEFAULT_DOMAIN, DEFAULT_USER_ID
+from lethe.constants import DEFAULT_DOMAIN, DEFAULT_RELATIONSHIP_WEIGHT, DEFAULT_USER_ID
 
 
 class Node(BaseModel):
@@ -59,9 +59,18 @@ class SearchResponse(BaseModel):
 
 
 class Edge(BaseModel):
-    subject: str
+    uuid: str
+    subject_uuid: str
     predicate: str
-    object: str
+    object_uuid: str
+    content: str = ""
+    weight: float = DEFAULT_RELATIONSHIP_WEIGHT
+    domain: str = DEFAULT_DOMAIN
+    user_id: str = DEFAULT_USER_ID
+    source: Optional[str] = None
+    journal_entry_ids: list[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class GraphExpandRequest(BaseModel):
@@ -94,10 +103,10 @@ class GraphExpandResponse(BaseModel):
                         lines.append(f"  - Source Snippet: {snippet}")
         lines.append("\n## Relationships\n")
         for edge in self.edges:
-            subj = self.nodes.get(edge.subject)
-            obj = self.nodes.get(edge.object)
-            subj_label = subj.content[:40] if subj else edge.subject[:8]
-            obj_label = obj.content[:40] if obj else edge.object[:8]
+            subj = self.nodes.get(edge.subject_uuid)
+            obj = self.nodes.get(edge.object_uuid)
+            subj_label = subj.content[:40] if subj else edge.subject_uuid[:8]
+            obj_label = obj.content[:40] if obj else edge.object_uuid[:8]
             lines.append(f"- {subj_label} --[{edge.predicate}]--> {obj_label}")
         return "\n".join(lines)
 

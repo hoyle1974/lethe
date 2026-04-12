@@ -55,7 +55,9 @@ def test_graph_expand_request_defaults():
 def test_graph_expand_response():
     r = GraphExpandResponse(
         nodes={"uuid1": Node(uuid="uuid1", node_type="person", content="Alice")},
-        edges=[Edge(subject="uuid1", predicate="works_at", object="uuid2")],
+        edges=[
+            Edge(uuid="rel_001", subject_uuid="uuid1", predicate="works_at", object_uuid="uuid2")
+        ],
     )
     assert len(r.nodes) == 1
     assert len(r.edges) == 1
@@ -73,7 +75,7 @@ def test_graph_expand_to_markdown():
             "s1": Node(uuid="s1", node_type="person", content="Alice"),
             "o1": Node(uuid="o1", node_type="generic", content="Acme Corp"),
         },
-        edges=[Edge(subject="s1", predicate="works_at", object="o1")],
+        edges=[Edge(uuid="rel_001", subject_uuid="s1", predicate="works_at", object_uuid="o1")],
     )
     md = r.to_markdown(seed_ids=["s1"])
     assert "Alice" in md

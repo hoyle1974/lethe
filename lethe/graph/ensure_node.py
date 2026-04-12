@@ -24,7 +24,7 @@ from lethe.graph.contradiction import evaluate_relationship_supersedes, tombston
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import ArrayUnion, DistanceMeasure, FieldFilter, Vector
 from lethe.infra.llm import LLMDispatcher
-from lethe.models.node import Node
+from lethe.models.node import Edge, Node
 
 log = logging.getLogger(__name__)
 
@@ -117,6 +117,25 @@ def doc_to_node(doc_id: str, data: dict) -> Node:
         created_at=parse_to_utc(data.get("created_at")),
         updated_at=parse_to_utc(data.get("updated_at")),
         embedding=embedding,
+    )
+
+
+def doc_to_edge(doc_id: str, data: dict) -> Edge:
+    """Convert a Firestore relationships document to an Edge model."""
+    data.pop("vector_distance", None)
+    return Edge(
+        uuid=doc_id,
+        subject_uuid=data.get("subject_uuid", ""),
+        predicate=data.get("predicate", ""),
+        object_uuid=data.get("object_uuid", ""),
+        content=data.get("content", ""),
+        weight=float(data.get("weight", DEFAULT_RELATIONSHIP_WEIGHT)),
+        domain=data.get("domain", DEFAULT_DOMAIN),
+        user_id=data.get("user_id", DEFAULT_USER_ID),
+        source=data.get("source"),
+        journal_entry_ids=list(data.get("journal_entry_ids", [])),
+        created_at=parse_to_utc(data.get("created_at")),
+        updated_at=parse_to_utc(data.get("updated_at")),
     )
 
 

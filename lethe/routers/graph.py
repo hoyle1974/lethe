@@ -80,9 +80,9 @@ def _merge_graphs(base: GraphExpandResponse, extra: GraphExpandResponse) -> Grap
     merged_nodes = dict(base.nodes)
     merged_nodes.update(extra.nodes)
     merged_edges = list(base.edges)
-    seen_edges = {(e.subject, e.predicate, e.object) for e in merged_edges}
+    seen_edges = {(e.subject_uuid, e.predicate, e.object_uuid) for e in merged_edges}
     for edge in extra.edges:
-        key = (edge.subject, edge.predicate, edge.object)
+        key = (edge.subject_uuid, edge.predicate, edge.object_uuid)
         if key not in seen_edges:
             seen_edges.add(key)
             merged_edges.append(edge)
