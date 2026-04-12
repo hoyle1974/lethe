@@ -6,13 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from lethe.graph.ingest import _looks_like_generated_id, _looks_like_placeholder_term, _resolve_term
 from lethe.graph.ensure_node import stable_self_id
+from lethe.graph.ingest import _looks_like_generated_id, _looks_like_placeholder_term, _resolve_term
 
 
 def _config():
     with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "test"}, clear=True):
         from lethe.config import Config
+
         return Config(_env_file=None)
 
 

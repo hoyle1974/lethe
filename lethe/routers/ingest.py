@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from lethe.config import Config
-from lethe.deps import get_db, get_embedder, get_llm, get_config, get_canonical_map
+from lethe.deps import get_canonical_map, get_config, get_db, get_embedder, get_llm
 from lethe.graph.canonical_map import CanonicalMap
 from lethe.graph.ingest import run_ingest
 from lethe.models.node import IngestRequest, IngestResponse
@@ -20,8 +20,14 @@ async def ingest(
 ):
     ts = req.timestamp.isoformat() if req.timestamp else None
     return await run_ingest(
-        db=db, embedder=embedder, llm=llm, config=config,
+        db=db,
+        embedder=embedder,
+        llm=llm,
+        config=config,
         canonical_map=canonical_map,
-        text=req.text, domain=req.domain, source=req.source,
-        user_id=req.user_id, timestamp=ts,
+        text=req.text,
+        domain=req.domain,
+        source=req.source,
+        user_id=req.user_id,
+        timestamp=ts,
     )

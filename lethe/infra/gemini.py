@@ -1,11 +1,13 @@
 import asyncio
 import logging
+
 import vertexai
+from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
+
 from lethe.config import Config
 from lethe.constants import EMBEDDING_TASK_RETRIEVAL_DOCUMENT
 from lethe.infra.llm import LLMRequest
 from lethe.types import EmbeddingTaskType
-from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
 
 try:
     from google import genai
@@ -66,7 +68,8 @@ class GeminiLLM:
                 retry_max_tokens = min(max(req.max_tokens * 2, req.max_tokens + 256), 32768)
                 if retry_max_tokens > req.max_tokens:
                     log.info(
-                        "GeminiLLM.dispatch retrying empty MAX_TOKENS response with higher limit (%d -> %d).",
+                        "GeminiLLM.dispatch retrying empty MAX_TOKENS response "
+                        "with higher limit (%d -> %d).",
                         req.max_tokens,
                         retry_max_tokens,
                     )
@@ -75,12 +78,14 @@ class GeminiLLM:
                     if retry_text:
                         return retry_text
                 log.warning(
-                    "GeminiLLM.dispatch response truncated at max tokens before text output (max_tokens=%d).",
+                    "GeminiLLM.dispatch response truncated at max tokens "
+                    "before text output (max_tokens=%d).",
                     req.max_tokens,
                 )
             else:
                 log.warning(
-                    "GeminiLLM.dispatch generation returned empty candidate content (finish_reason=%s).",
+                    "GeminiLLM.dispatch generation returned empty candidate content "
+                    "(finish_reason=%s).",
                     finish_reason or "UNKNOWN",
                 )
             return "status: none\ntriples:\n"

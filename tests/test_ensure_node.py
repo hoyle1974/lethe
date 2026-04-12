@@ -1,10 +1,9 @@
-import pytest
 from lethe.graph.ensure_node import (
-    stable_entity_doc_id,
-    stable_self_id,
-    stable_rel_id,
-    normalized_predicate,
     _looks_like_entity_doc_id,
+    normalized_predicate,
+    stable_entity_doc_id,
+    stable_rel_id,
+    stable_self_id,
 )
 
 

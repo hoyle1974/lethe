@@ -1,11 +1,10 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 from typing import Optional
 
 from google.cloud import firestore
-
-log = logging.getLogger(__name__)
 
 from lethe.config import Config
 from lethe.constants import (
@@ -19,7 +18,10 @@ from lethe.constants import (
 from lethe.graph.ensure_node import stable_self_id
 from lethe.graph.search import cosine_similarity, doc_to_node
 from lethe.infra.embedder import Embedder
-from lethe.models.node import Node, Edge, GraphExpandResponse
+from lethe.models.node import Edge, GraphExpandResponse, Node
+
+log = logging.getLogger(__name__)
+
 
 def apply_self_seed_neighbor_floor(
     pruned: list[Node],
@@ -64,10 +66,15 @@ def prune_frontier_by_similarity(
                     cosine_similarity(n.embedding, query_vector)
                     if (query_vector is not None and n.embedding)
                     else 0.0
-                ) * TRAVERSAL_SIMILARITY_WEIGHT
+                )
+                * TRAVERSAL_SIMILARITY_WEIGHT
             )
             + (
-                ((len(n.journal_entry_ids) / max_observation_count) if max_observation_count else 0.0)
+                (
+                    (len(n.journal_entry_ids) / max_observation_count)
+                    if max_observation_count
+                    else 0.0
+                )
                 * TRAVERSAL_OBSERVATION_WEIGHT
             ),
         )
@@ -94,7 +101,7 @@ async def _fetch_nodes_by_ids(
     col = db.collection(config.lethe_collection)
     result: dict[str, Node] = {}
     for i in range(0, len(ids), TRAVERSE_BATCH_SIZE):
-        chunk = ids[i:i + TRAVERSE_BATCH_SIZE]
+        chunk = ids[i : i + TRAVERSE_BATCH_SIZE]
         refs = [col.document(uid) for uid in chunk]
         async for snap in db.get_all(refs):
             if snap.exists:
@@ -111,10 +118,10 @@ async def _get_incoming_spo_edges(
 ) -> list[str]:
     """Return UUIDs of relationship nodes whose object_uuid == node_uuid."""
     from lethe.infra.fs_helpers import FieldFilter
+
     col = db.collection(config.lethe_collection)
     q = (
-        col
-        .where(filter=FieldFilter("object_uuid", "==", node_uuid))
+        col.where(filter=FieldFilter("object_uuid", "==", node_uuid))
         .where(filter=FieldFilter("user_id", "==", user_id))
         .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
     )
@@ -135,10 +142,10 @@ async def _get_nodes_linking_to(
 ) -> list[str]:
     """Return UUIDs of nodes that have node_uuid in their entity_links."""
     from lethe.infra.fs_helpers import FieldFilter
+
     col = db.collection(config.lethe_collection)
     q = (
-        col
-        .where(filter=FieldFilter("entity_links", "array_contains", node_uuid))
+        col.where(filter=FieldFilter("entity_links", "array_contains", node_uuid))
         .where(filter=FieldFilter("user_id", "==", user_id))
         .limit(TRAVERSE_NEIGHBOR_QUERY_LIMIT)
     )
@@ -187,9 +194,7 @@ async def graph_expand(
         if node.node_type != NODE_TYPE_LOG and _is_alive(node):
             all_nodes[node.uuid] = node
 
-    frontier = [
-        n for n in seed_nodes.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)
-    ]
+    frontier = [n for n in seed_nodes.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)]
     log.info(
         "graph_expand:seed_fetch requested=%d found=%d frontier=%d",
         len(seed_ids),
@@ -209,10 +214,7 @@ async def graph_expand(
         self_seed_id = stable_self_id(user_id)
         self_in_frontier = any(node.uuid == self_seed_id for node in frontier)
 
-        gather_tasks = [
-            _gather_neighbors(db, config, node, user_id, sem)
-            for node in frontier
-        ]
+        gather_tasks = [_gather_neighbors(db, config, node, user_id, sem) for node in frontier]
         neighbor_lists = await asyncio.gather(*gather_tasks)
 
         for node, (incoming_spo, linking_to) in zip(frontier, neighbor_lists):
@@ -232,11 +234,13 @@ async def graph_expand(
                 and node.object_uuid
                 and _is_alive(node)
             ):
-                all_edges.append(Edge(
-                    subject=node.subject_uuid,
-                    predicate=node.predicate or "related_to",
-                    object=node.object_uuid,
-                ))
+                all_edges.append(
+                    Edge(
+                        subject=node.subject_uuid,
+                        predicate=node.predicate or "related_to",
+                        object=node.object_uuid,
+                    )
+                )
 
         if not next_ids:
             log.info("graph_expand:hop=%d no_next_ids frontier=%d", hop_idx + 1, len(frontier))
@@ -255,9 +259,7 @@ async def graph_expand(
                 visited.add(n.uuid)
                 all_nodes[n.uuid] = n  # keep as journal context in response
 
-        non_log = [
-            n for n in candidates.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)
-        ]
+        non_log = [n for n in candidates.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)]
         self_neighbors = [n for n in non_log if n.uuid in self_neighbor_ids]
 
         pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)
@@ -277,7 +279,8 @@ async def graph_expand(
 
         frontier = pruned
         log.info(
-            "graph_expand:hop=%d frontier_in=%d next_ids=%d candidates=%d non_log=%d pruned=%d logs=%d total_nodes=%d total_edges=%d",
+            "graph_expand:hop=%d frontier_in=%d next_ids=%d candidates=%d "
+            "non_log=%d pruned=%d logs=%d total_nodes=%d total_edges=%d",
             hop_idx + 1,
             len(neighbor_lists),
             len(next_ids),

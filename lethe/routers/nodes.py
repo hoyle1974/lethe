@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,6 +37,7 @@ async def list_nodes(
     config: Config = Depends(get_config),
 ) -> list[Node]:
     from lethe.infra.fs_helpers import FieldFilter
+
     col = db.collection(config.lethe_collection)
     # Only filter on user_id server-side; all other filters are client-side
     # to avoid needing composite indexes on every field combination.
@@ -51,5 +53,4 @@ async def list_nodes(
         all_results.append(doc_to_node(doc.id, data))
 
     all_results.sort(key=lambda n: n.created_at or "", reverse=False)
-    return all_results[offset: offset + limit]
-
+    return all_results[offset : offset + limit]

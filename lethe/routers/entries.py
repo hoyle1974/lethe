@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,6 +39,7 @@ async def list_entries(
     config: Config = Depends(get_config),
 ) -> list[Node]:
     from lethe.infra.fs_helpers import FieldFilter
+
     col = db.collection(config.lethe_collection)
     # Filter only on user_id server-side; node_type, since, and sort are
     # handled client-side to avoid composite index requirements.
@@ -53,4 +55,3 @@ async def list_entries(
 
     results.sort(key=lambda n: n.created_at or "", reverse=not ascending)
     return results[:limit]
-

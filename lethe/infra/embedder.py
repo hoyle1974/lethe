@@ -10,12 +10,10 @@ class Embedder(Protocol):
         self,
         text: str,
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
-    ) -> list[float]:
-        ...
+    ) -> list[float]: ...
 
     async def embed_batch(
         self,
         texts: list[str],
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
-    ) -> list[list[float]]:
-        ...
+    ) -> list[list[float]]: ...

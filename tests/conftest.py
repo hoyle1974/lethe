@@ -4,6 +4,7 @@ conftest.py — shared fixtures and module stubs for tests.
 Stubs out vertexai (google-cloud-aiplatform) so tests run without
 the heavy GCP AI Platform installation.
 """
+
 import sys
 import types
 from unittest.mock import MagicMock
@@ -35,8 +36,9 @@ sys.modules.setdefault("vertexai.generative_models", _generative_models)
 # ---------------------------------------------------------------------------
 # Mock embedder and LLM implementations for tests
 # ---------------------------------------------------------------------------
-import pytest
-import hashlib
+import hashlib  # noqa: E402
+
+import pytest  # noqa: E402
 
 
 class MockEmbedder:

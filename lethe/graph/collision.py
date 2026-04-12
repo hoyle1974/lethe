@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 
 from lethe.constants import LLM_MAX_TOKENS_FACT_COLLISION
@@ -24,11 +25,13 @@ async def evaluate_fact_collision(
     """Return 'update' or 'insert'. Falls back to 'insert' on any error."""
     try:
         user_prompt = f"New Fact:\n{new_fact}\n\nExisting Fact:\n{existing_fact}"
-        text = await llm.dispatch(LLMRequest(
-            system_prompt=_get_collision_system(),
-            user_prompt=user_prompt,
-            max_tokens=LLM_MAX_TOKENS_FACT_COLLISION,
-        ))
+        text = await llm.dispatch(
+            LLMRequest(
+                system_prompt=_get_collision_system(),
+                user_prompt=user_prompt,
+                max_tokens=LLM_MAX_TOKENS_FACT_COLLISION,
+            )
+        )
         if "update" in text.lower():
             return "update"
         return "insert"

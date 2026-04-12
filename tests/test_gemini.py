@@ -13,7 +13,9 @@ def _make_client(response):
     async def _generate_content(*_args, **_kwargs):
         return response
 
-    return SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=_generate_content)))
+    return SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=_generate_content))
+    )
 
 
 def _make_sequence_client(responses):
@@ -94,9 +96,7 @@ async def test_dispatch_retries_max_tokens_empty_response_once(monkeypatch):
     )
 
     llm = GeminiLLM(Config(google_cloud_project="test-project"))
-    result = await llm.dispatch(
-        LLMRequest(system_prompt="", user_prompt="hello", max_tokens=64)
-    )
+    result = await llm.dispatch(LLMRequest(system_prompt="", user_prompt="hello", max_tokens=64))
 
     assert result.startswith("status: ok")
     assert aio_models.call_count == 2

@@ -1,4 +1,5 @@
 from fastapi import Request
+
 from lethe.config import Config
 from lethe.graph.canonical_map import CanonicalMap, load_canonical_map
 

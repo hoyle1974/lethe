@@ -157,8 +157,9 @@ async def summarize(
     q = req.query if req.query is not None else ""
     if question_query_mode:
         system = (
-            "You are a query-resolution RAG engine. Resolve the user query using only graph evidence: "
-            f"{q}. Return markdown with sections:\n"
+            "You are a query-resolution RAG engine. "
+            f"Resolve the user query using only graph evidence: {q}. "
+            "Return markdown with sections:\n"
             "Answer: direct response to the query.\n"
             "Evidence: bullet points with the most relevant supporting facts.\n"
             "Gaps: what is unknown or not supported by the retrieved graph.\n"
@@ -169,7 +170,8 @@ async def summarize(
             f"You are a knowledge summarization engine. The subject is: {q}. "
             "Using ALL graph evidence provided, write a comprehensive profile summary. "
             "Cover every domain present in the graph: professional role, projects, tasks, "
-            "relationships, personal life, home, family, pets, plans, and any other notable details. "
+            "relationships, personal life, home, family, pets, plans, "
+            "and any other notable details.\n"
             "Do not omit topics just because they seem minor. Return markdown with sections:\n"
             "Profile: 2-3 sentence overview.\n"
             "Work & Projects: bullet points for professional facts, projects, tasks, deadlines.\n"
@@ -180,16 +182,18 @@ async def summarize(
         )
     else:
         system = (
-            "You are a query-resolution RAG engine. Resolve this free-form query using only graph evidence: "
-            f"{q}. Return markdown with sections:\n"
+            "You are a query-resolution RAG engine. Resolve this free-form query "
+            f"using only graph evidence: {q}. Return markdown with sections:\n"
             "Response: concise synthesis or recommended resolution grounded in facts.\n"
             "Evidence: bullet points with concrete supporting facts.\n"
             "Gaps: what is unknown, missing, or uncertain.\n"
-            "Use short sections and bullets, not a single paragraph. Do not use conversational filler."
+            "Use short sections and bullets, not a single paragraph. "
+            "Do not use conversational filler."
         )
     thought_system = (
-        f"Query focus: {q}. Based on the current graph data and this query, identify missing entities or relationships "
-        "that would make this summary more complete? Reply with up to 3 short retrieval queries "
+        f"Query focus: {q}. Based on the current graph data and this query, "
+        "identify missing entities or relationships that would make this summary more complete? "
+        "Reply with up to 3 short retrieval queries "
         "(entity names, relationship phrases, or topics), one per line, or 'NONE'. "
         "Keep each query tightly relevant to the user query; avoid tangential topics."
     )
@@ -220,20 +224,22 @@ async def summarize(
     target_queries = _extract_target_queries(thought or "")
     retrieval_seed_ids: list[str] = []
     if target_queries:
-        search_results = await asyncio.gather(*[
-            execute_search(
-                db=db,
-                embedder=embedder,
-                config=config,
-                query=target_query,
-                node_types=[],
-                domain=None,
-                user_id=req.user_id,
-                limit=5,
-                min_significance=0.0,
-            )
-            for target_query in target_queries
-        ])
+        search_results = await asyncio.gather(
+            *[
+                execute_search(
+                    db=db,
+                    embedder=embedder,
+                    config=config,
+                    query=target_query,
+                    node_types=[],
+                    domain=None,
+                    user_id=req.user_id,
+                    limit=5,
+                    min_significance=0.0,
+                )
+                for target_query in target_queries
+            ]
+        )
         seen_seed_ids: set[str] = set()
         for nodes in search_results:
             for node in nodes:
@@ -282,8 +288,10 @@ async def summarize(
     elif broad_query_mode:
         final_prompt = (
             "Improve and expand this draft into a complete profile using the enriched graph. "
-            "Include ALL topics present: work, projects, tasks, people, personal life, home, pets, plans. "
-            "Return sections: Profile:\nWork & Projects:\nRelationships:\nPersonal & Home:\nOpen Items:\n"
+            "Include ALL topics present: work, projects, tasks, people, "
+            "personal life, home, pets, plans. "
+            "Return sections: Profile:\nWork & Projects:\nRelationships:\n"
+            "Personal & Home:\nOpen Items:\n"
             "Preserve factual accuracy and avoid filler.\n\n"
             f"Draft Summary:\n{(draft_summary or '').strip()}\n\n"
             f"Enriched Graph:\n{final_md}"
@@ -323,8 +331,8 @@ async def summarize(
             )
         else:
             retry_prompt = (
-                "The previous response was too brief. Rewrite as a compact markdown query-resolution brief "
-                "with sections Response, Evidence, and Gaps.\n\n"
+                "The previous response was too brief. Rewrite as a compact markdown "
+                "query-resolution brief with sections Response, Evidence, and Gaps.\n\n"
                 f"Query: {q}\n\n"
                 f"Graph:\n{final_md}"
             )

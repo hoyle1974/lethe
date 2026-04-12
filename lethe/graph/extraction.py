@@ -1,24 +1,36 @@
 from __future__ import annotations
+
 import logging
 import os
-import re
 from dataclasses import dataclass
 
-log = logging.getLogger(__name__)
-
-from jinja2 import Environment, BaseLoader
+from jinja2 import BaseLoader, Environment
 
 from lethe.constants import (
     DEFAULT_NODE_TYPE,
     LLM_MAX_TOKENS_EXTRACTION,
 )
-from lethe.infra.llm import LLMDispatcher, LLMRequest
 from lethe.graph.ensure_node import normalized_predicate
+from lethe.infra.llm import LLMDispatcher, LLMRequest
+
+log = logging.getLogger(__name__)
 
 _PRONOUNS = {
-    "i", "me", "my", "myself", "mine",
-    "we", "us", "our", "ours", "ourselves",
-    "you", "your", "yours", "yourself", "yourselves",
+    "i",
+    "me",
+    "my",
+    "myself",
+    "mine",
+    "we",
+    "us",
+    "our",
+    "ours",
+    "ourselves",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
 }
 
 _PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -86,13 +98,15 @@ def parse_refinery_output(raw: str) -> tuple[str, list[RefineryTriple]]:
                 continue
             sub_type = parts[3] if len(parts) == 5 else DEFAULT_NODE_TYPE
             obj_type = parts[4] if len(parts) == 5 else DEFAULT_NODE_TYPE
-            triples.append(RefineryTriple(
-                subject=subject,
-                predicate=predicate,
-                object=obj,
-                subject_type=sub_type,
-                object_type=obj_type,
-            ))
+            triples.append(
+                RefineryTriple(
+                    subject=subject,
+                    predicate=predicate,
+                    object=obj,
+                    subject_type=sub_type,
+                    object_type=obj_type,
+                )
+            )
 
     return status, triples
 
@@ -124,15 +138,24 @@ async def extract_triples(
 ) -> tuple[str, list[RefineryTriple]]:
     prompt = build_refinery_prompt(node_types, allowed_predicates, text, owner_name)
     log.info("extraction: sending prompt to LLM (text=%r)", text[:120])
-    raw = await llm.dispatch(LLMRequest(
-        system_prompt=REFINERY_SYSTEM,
-        user_prompt=prompt,
-        max_tokens=LLM_MAX_TOKENS_EXTRACTION,
-    ))
+    raw = await llm.dispatch(
+        LLMRequest(
+            system_prompt=REFINERY_SYSTEM,
+            user_prompt=prompt,
+            max_tokens=LLM_MAX_TOKENS_EXTRACTION,
+        )
+    )
     log.info("extraction: raw LLM response:\n%s", raw)
     status, triples = parse_refinery_output(raw)
     log.info("extraction: parsed status=%r triples=%d", status, len(triples))
     for t in triples:
-        log.info("extraction: triple %r | %r | %r (sub_type=%r obj_type=%r new=%s)",
-                 t.subject, t.predicate, t.object, t.subject_type, t.object_type, t.is_new_predicate)
+        log.info(
+            "extraction: triple %r | %r | %r (sub_type=%r obj_type=%r new=%s)",
+            t.subject,
+            t.predicate,
+            t.object,
+            t.subject_type,
+            t.object_type,
+            t.is_new_predicate,
+        )
     return status, triples

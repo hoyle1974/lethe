@@ -1,11 +1,13 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from lethe.graph.canonical_map import (
     DEFAULT_NODE_TYPES,
     DEFAULT_PREDICATES,
     CanonicalMap,
-    load_canonical_map,
     append_predicate,
+    load_canonical_map,
 )
 
 

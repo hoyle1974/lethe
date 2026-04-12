@@ -1,12 +1,15 @@
 import pytest
-from tests.conftest import MockLLM
+
 from lethe.graph.collision import evaluate_fact_collision, evaluate_fact_collision_if_enabled
+from tests.conftest import MockLLM
 
 
 @pytest.mark.asyncio
 async def test_collision_returns_update():
     llm = MockLLM("update")
-    result = await evaluate_fact_collision(llm, "Alice works at Acme", "Alice is employed by Acme Corp")
+    result = await evaluate_fact_collision(
+        llm, "Alice works at Acme", "Alice is employed by Acme Corp"
+    )
     assert result == "update"
 
 

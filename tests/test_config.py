@@ -1,11 +1,13 @@
-import pytest
 import os
 from unittest.mock import patch
+
+import pytest
 
 
 def test_config_defaults():
     with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "test-project"}, clear=True):
         from lethe.config import Config
+
         cfg = Config()
         assert cfg.google_cloud_project == "test-project"
         assert cfg.lethe_collection == "nodes"
@@ -21,4 +23,5 @@ def test_config_missing_project():
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(Exception):
             from lethe.config import Config
+
             Config(_env_file=None)

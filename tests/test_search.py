@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,8 +12,8 @@ from lethe.graph.search import (
 )
 from lethe.models.node import Node
 
-
 # --- cosine_similarity ---
+
 
 def test_cosine_similarity_identical():
     v = [1.0, 0.0, 0.0]
@@ -37,6 +38,7 @@ def test_cosine_similarity_opposite():
 
 # --- doc_to_node strips vector_distance field ---
 
+
 def test_doc_to_node_strips_vector_distance():
     data = {
         "node_type": "person",
@@ -46,7 +48,7 @@ def test_doc_to_node_strips_vector_distance():
         "metadata": "{}",
         "entity_links": [],
         "user_id": "global",
-        "vector_distance": 0.12,   # must be stripped, not cause validation error
+        "vector_distance": 0.12,  # must be stripped, not cause validation error
     }
     node = doc_to_node("abc123", data)
     assert node.uuid == "abc123"
@@ -127,4 +129,3 @@ def test_effective_distance_reinforcement_reduces_effective_distance():
     )
     raw = 0.3
     assert effective_distance_decay(reinforced, raw, now) < effective_distance_decay(base, raw, now)
-

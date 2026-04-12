@@ -1,14 +1,12 @@
 from __future__ import annotations
+
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-log = logging.getLogger(__name__)
-
 from google.cloud import firestore
-from lethe.infra.fs_helpers import Vector, ArrayUnion
 
 from lethe.config import Config
 from lethe.constants import (
@@ -22,13 +20,19 @@ from lethe.constants import (
 )
 from lethe.graph.canonical_map import CanonicalMap, append_predicate
 from lethe.graph.ensure_node import (
-    ensure_node, create_relationship_node, add_entity_link,
-    stable_entity_doc_id, stable_self_id,
+    add_entity_link,
+    create_relationship_node,
+    ensure_node,
+    stable_entity_doc_id,
+    stable_self_id,
 )
-from lethe.graph.extraction import extract_triples, RefineryTriple
+from lethe.graph.extraction import RefineryTriple, extract_triples
 from lethe.infra.embedder import Embedder
+from lethe.infra.fs_helpers import ArrayUnion, Vector
 from lethe.infra.llm import LLMDispatcher
 from lethe.models.node import IngestResponse, Node
+
+log = logging.getLogger(__name__)
 
 _GENERATED_ID_RE = re.compile(r"^(?:entity|rel)_[0-9a-f]{40}$", re.IGNORECASE)
 _UUID_RE = re.compile(
@@ -64,19 +68,21 @@ async def run_ingest(
     # Step 1: store episodic log entry
     vector = await embedder.embed(text, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
     col = db.collection(config.lethe_collection)
-    await col.document(entry_uuid).set({
-        "node_type": NODE_TYPE_LOG,
-        "content": text,
-        "domain": domain,
-        "weight": DEFAULT_LOG_WEIGHT,
-        "metadata": "{}",
-        "embedding": Vector(vector),
-        "entity_links": [],
-        "user_id": user_id,
-        "source": source,
-        "created_at": ts,
-        "updated_at": ts,
-    })
+    await col.document(entry_uuid).set(
+        {
+            "node_type": NODE_TYPE_LOG,
+            "content": text,
+            "domain": domain,
+            "weight": DEFAULT_LOG_WEIGHT,
+            "metadata": "{}",
+            "embedding": Vector(vector),
+            "entity_links": [],
+            "user_id": user_id,
+            "source": source,
+            "created_at": ts,
+            "updated_at": ts,
+        }
+    )
 
     log.info("ingest: entry_uuid=%s text=%r", entry_uuid, text[:120])
 
@@ -89,8 +95,12 @@ async def run_ingest(
     )
     log.info("ingest: extraction status=%s triples=%d", status, len(triples))
     for t in triples:
-        log.info("ingest: triple subject=%r predicate=%r object=%r",
-                 t.subject, t.canonical_predicate, t.object)
+        log.info(
+            "ingest: triple subject=%r predicate=%r object=%r",
+            t.subject,
+            t.canonical_predicate,
+            t.object,
+        )
     if status == "none" or not triples:
         log.warning("ingest: no triples extracted — entry_uuid=%s", entry_uuid)
         return IngestResponse(entry_uuid=entry_uuid)
@@ -107,9 +117,16 @@ async def run_ingest(
     for triple in triples:
         try:
             outcome = await _process_triple(
-                db=db, embedder=embedder, llm=llm, config=config,
-                triple=triple, entry_uuid=entry_uuid, ts=ts, user_id=user_id,
-                nodes_created=nodes_created, nodes_updated=nodes_updated,
+                db=db,
+                embedder=embedder,
+                llm=llm,
+                config=config,
+                triple=triple,
+                entry_uuid=entry_uuid,
+                ts=ts,
+                user_id=user_id,
+                nodes_created=nodes_created,
+                nodes_updated=nodes_updated,
                 relationships_created=relationships_created,
                 canonical_map=canonical_map,
             )
@@ -120,10 +137,17 @@ async def run_ingest(
             rejection_counts["triple_processing_error"] += 1
             continue
 
-    log.info("ingest: complete entry_uuid=%s nodes_created=%d nodes_updated=%d relationships=%d",
-             entry_uuid, len(nodes_created), len(nodes_updated), len(relationships_created))
+    log.info(
+        "ingest: complete entry_uuid=%s nodes_created=%d nodes_updated=%d relationships=%d",
+        entry_uuid,
+        len(nodes_created),
+        len(nodes_updated),
+        len(relationships_created),
+    )
     if any(v > 0 for v in rejection_counts.values()):
-        log.info("ingest: triple rejection summary entry_uuid=%s counts=%s", entry_uuid, rejection_counts)
+        log.info(
+            "ingest: triple rejection summary entry_uuid=%s counts=%s", entry_uuid, rejection_counts
+        )
     return IngestResponse(
         entry_uuid=entry_uuid,
         nodes_created=nodes_created,
@@ -133,9 +157,17 @@ async def run_ingest(
 
 
 async def _process_triple(
-    db, embedder, llm, config, triple: RefineryTriple,
-    entry_uuid, ts, user_id,
-    nodes_created, nodes_updated, relationships_created,
+    db,
+    embedder,
+    llm,
+    config,
+    triple: RefineryTriple,
+    entry_uuid,
+    ts,
+    user_id,
+    nodes_created,
+    nodes_updated,
+    relationships_created,
     canonical_map: CanonicalMap,
 ):
     predicate = triple.canonical_predicate
@@ -183,11 +215,18 @@ async def _process_triple(
     _track(obj_node.uuid, obj_exists, nodes_created, nodes_updated)
 
     rel_id = await create_relationship_node(
-        db=db, embedder=embedder, config=config,
-        subject_id=subj_node.uuid, predicate=predicate, object_id=obj_node.uuid,
+        db=db,
+        embedder=embedder,
+        config=config,
+        subject_id=subj_node.uuid,
+        predicate=predicate,
+        object_id=obj_node.uuid,
         source_entry_id=entry_uuid,
-        subject_content=subj_node.content, object_content=obj_node.content,
-        timestamp=ts, user_id=user_id, llm=llm,
+        subject_content=subj_node.content,
+        object_content=obj_node.content,
+        timestamp=ts,
+        user_id=user_id,
+        llm=llm,
     )
     if rel_id not in relationships_created:
         relationships_created.append(rel_id)
@@ -286,10 +325,12 @@ async def _get_or_create_entity_node(
                 llm=llm,
             )
             return False, node
-        await ref.update({
-            "journal_entry_ids": ArrayUnion([entry_uuid]),
-            "updated_at": ts,
-        })
+        await ref.update(
+            {
+                "journal_entry_ids": ArrayUnion([entry_uuid]),
+                "updated_at": ts,
+            }
+        )
         snap = await ref.get()
         data = snap.to_dict() or {}
         node = Node(

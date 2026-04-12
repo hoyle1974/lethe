@@ -1,13 +1,12 @@
 from __future__ import annotations
+
 import hashlib
 import logging
 import re
-import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from google.cloud import firestore
-from lethe.infra.fs_helpers import Vector, DistanceMeasure, ArrayUnion, FieldFilter
 
 from lethe.config import Config
 from lethe.constants import (
@@ -23,6 +22,7 @@ from lethe.constants import (
 )
 from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
 from lethe.infra.embedder import Embedder
+from lethe.infra.fs_helpers import ArrayUnion, DistanceMeasure, FieldFilter, Vector
 from lethe.infra.llm import LLMDispatcher
 from lethe.models.node import Node
 
@@ -53,6 +53,7 @@ def parse_to_utc(value: object) -> Optional[datetime]:
         except (TypeError, OSError, ValueError):
             pass
     return None
+
 
 _ENTITY_DOC_ID_RE = re.compile(r"^entity_[0-9a-f]{40}$", re.IGNORECASE)
 
@@ -127,16 +128,12 @@ async def _find_nearest_by_type(
 ) -> Optional[Node]:
     """Vector ANN search restricted to node_type, returning nearest match within threshold."""
     try:
-        query = (
-            collection
-            .where(filter=FieldFilter("node_type", "==", node_type))
-            .find_nearest(
-                vector_field="embedding",
-                query_vector=Vector(vector),
-                distance_measure=DistanceMeasure.COSINE,
-                limit=5,
-                distance_result_field="vector_distance",
-            )
+        query = collection.where(filter=FieldFilter("node_type", "==", node_type)).find_nearest(
+            vector_field="embedding",
+            query_vector=Vector(vector),
+            distance_measure=DistanceMeasure.COSINE,
+            limit=5,
+            distance_result_field="vector_distance",
         )
         async for doc in query.stream():
             data = doc.to_dict() or {}
@@ -182,11 +179,15 @@ async def ensure_node(
         if snap.exists:
             data = snap.to_dict() or {}
             if source_entry_id:
-                await ref.update({
-                    "journal_entry_ids": ArrayUnion([source_entry_id]),
-                    "updated_at": ts,
-                })
-                data["journal_entry_ids"] = list(set(list(data.get("journal_entry_ids", [])) + [source_entry_id]))
+                await ref.update(
+                    {
+                        "journal_entry_ids": ArrayUnion([source_entry_id]),
+                        "updated_at": ts,
+                    }
+                )
+                data["journal_entry_ids"] = list(
+                    set(list(data.get("journal_entry_ids", [])) + [source_entry_id])
+                )
                 data["updated_at"] = ts
             return doc_to_node(doc_id, data)
 
@@ -216,10 +217,12 @@ async def ensure_node(
             raise ValueError(f"ensure_node: entity id not found: {clean}")
         existing = id_snap.to_dict() or {}
         if source_entry_id:
-            await id_ref.update({
-                "journal_entry_ids": ArrayUnion([source_entry_id]),
-                "updated_at": timestamp or _now_iso(),
-            })
+            await id_ref.update(
+                {
+                    "journal_entry_ids": ArrayUnion([source_entry_id]),
+                    "updated_at": timestamp or _now_iso(),
+                }
+            )
         return doc_to_node(clean, existing)
 
     vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
@@ -231,20 +234,25 @@ async def ensure_node(
     if nearest is not None:
         if llm is not None and config.lethe_collision_detection:
             from lethe.graph.collision import evaluate_fact_collision
+
             action = await evaluate_fact_collision(llm, clean, nearest.content)
             if action == "update":
                 new_vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
-                await collection.document(nearest.uuid).update({
-                    "content": clean,
-                    "name_key": clean.lower(),
-                    "embedding": Vector(new_vector),
-                    "updated_at": _now_iso(),
-                })
+                await collection.document(nearest.uuid).update(
+                    {
+                        "content": clean,
+                        "name_key": clean.lower(),
+                        "embedding": Vector(new_vector),
+                        "updated_at": _now_iso(),
+                    }
+                )
         if source_entry_id:
-            await collection.document(nearest.uuid).update({
-                "journal_entry_ids": ArrayUnion([source_entry_id]),
-                "updated_at": _now_iso(),
-            })
+            await collection.document(nearest.uuid).update(
+                {
+                    "journal_entry_ids": ArrayUnion([source_entry_id]),
+                    "updated_at": _now_iso(),
+                }
+            )
         return nearest
 
     # Step 2: SHA1 stable doc ID
@@ -257,18 +265,19 @@ async def ensure_node(
     name_key = clean.lower()
     try:
         existing_query = (
-            collection
-            .where(filter=FieldFilter("name_key", "==", name_key))
+            collection.where(filter=FieldFilter("name_key", "==", name_key))
             .where(filter=FieldFilter("node_type", "==", node_type))
             .limit(1)
         )
         async for existing_doc in existing_query.stream():
             existing_data = existing_doc.to_dict() or {}
             if source_entry_id:
-                await collection.document(existing_doc.id).update({
-                    "journal_entry_ids": ArrayUnion([source_entry_id]),
-                    "updated_at": ts,
-                })
+                await collection.document(existing_doc.id).update(
+                    {
+                        "journal_entry_ids": ArrayUnion([source_entry_id]),
+                        "updated_at": ts,
+                    }
+                )
             return doc_to_node(existing_doc.id, existing_data)
     except Exception:
         pass
@@ -296,10 +305,13 @@ async def ensure_node(
         if snap.exists:
             data = snap.to_dict() or {}
             if source_entry_id:
-                transaction.update(ref, {
-                    "journal_entry_ids": ArrayUnion([source_entry_id]),
-                    "updated_at": ts,
-                })
+                transaction.update(
+                    ref,
+                    {
+                        "journal_entry_ids": ArrayUnion([source_entry_id]),
+                        "updated_at": ts,
+                    },
+                )
             return doc_to_node(doc_id, data)
         transaction.set(ref, node_data)
         return doc_to_node(doc_id, node_data)
@@ -319,7 +331,6 @@ async def add_entity_link(
 ) -> None:
     ref = db.collection(config.lethe_collection).document(node_uuid)
     await ref.update({"entity_links": ArrayUnion([link_uuid])})
-
 
 
 async def create_relationship_node(

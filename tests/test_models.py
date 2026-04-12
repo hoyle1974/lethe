@@ -1,6 +1,6 @@
-from tests.conftest import MockEmbedder, MockLLM
 from lethe.infra.embedder import Embedder
 from lethe.infra.llm import LLMDispatcher
+from tests.conftest import MockEmbedder, MockLLM
 
 
 def test_mock_embedder_satisfies_protocol():

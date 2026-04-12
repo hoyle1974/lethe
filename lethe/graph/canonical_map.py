@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
+
 from google.cloud import firestore
+
 from lethe.constants import (
     DEFAULT_NODE_TYPE,
     NODE_TYPE_LOG,
@@ -11,14 +13,33 @@ CONFIG_COLLECTION = "_config"
 CANONICAL_MAP_DOC = "canonical_map"
 
 DEFAULT_NODE_TYPES = [
-    "person", "place", "event", "project", "goal",
-    "preference", "asset", "tool", DEFAULT_NODE_TYPE, NODE_TYPE_RELATIONSHIP, NODE_TYPE_LOG,
+    "person",
+    "place",
+    "event",
+    "project",
+    "goal",
+    "preference",
+    "asset",
+    "tool",
+    DEFAULT_NODE_TYPE,
+    NODE_TYPE_RELATIONSHIP,
+    NODE_TYPE_LOG,
 ]
 
 DEFAULT_PREDICATES = [
-    "works_at", "lives_in", "knows", "is_part_of", "owns",
-    "uses", "participates_in", "located_at", "created_by",
-    "manages", "reports_to", "related_to", "is_a",
+    "works_at",
+    "lives_in",
+    "knows",
+    "is_part_of",
+    "owns",
+    "uses",
+    "participates_in",
+    "located_at",
+    "created_by",
+    "manages",
+    "reports_to",
+    "related_to",
+    "is_a",
 ]
 
 
@@ -44,10 +65,12 @@ async def seed_canonical_map(db: firestore.AsyncClient) -> None:
     ref = db.collection(CONFIG_COLLECTION).document(CANONICAL_MAP_DOC)
     doc = await ref.get()
     if not doc.exists:
-        await ref.set({
-            "node_types": DEFAULT_NODE_TYPES,
-            "allowed_predicates": DEFAULT_PREDICATES,
-        })
+        await ref.set(
+            {
+                "node_types": DEFAULT_NODE_TYPES,
+                "allowed_predicates": DEFAULT_PREDICATES,
+            }
+        )
 
 
 async def append_predicate(db: firestore.AsyncClient, predicate: str) -> None:

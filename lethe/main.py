@@ -1,16 +1,18 @@
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+
 from lethe.config import Config
+from lethe.graph.canonical_map import seed_canonical_map
 from lethe.infra.firestore import create_firestore_client
 from lethe.infra.gemini import GeminiEmbedder, GeminiLLM
-from lethe.graph.canonical_map import seed_canonical_map
 from lethe.routers import admin
-from lethe.routers import ingest as ingest_router
-from lethe.routers import search as search_router
-from lethe.routers import graph as graph_router
-from lethe.routers import nodes as nodes_router
 from lethe.routers import entries as entries_router
+from lethe.routers import graph as graph_router
+from lethe.routers import ingest as ingest_router
+from lethe.routers import nodes as nodes_router
+from lethe.routers import search as search_router
 
 
 @asynccontextmanager

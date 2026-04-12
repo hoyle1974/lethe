@@ -1,9 +1,7 @@
-import pytest
 from lethe.graph.extraction import (
+    build_refinery_prompt,
     parse_refinery_output,
     resolve_pronoun,
-    RefineryTriple,
-    build_refinery_prompt,
 )
 
 
@@ -50,7 +48,7 @@ def test_parse_refinery_output_keeps_generated_id_terms_for_downstream_resolutio
     raw = (
         "status: ok\n"
         "triples:\n"
-        "entity_3579d6dd3611a4b7e3cbdb79e5a29698b937bb4e | discusses | Aegis deadline | generic | event\n"
+        "entity_3579d6dd3611a4b7e3cbdb79e5a29698b937bb4e | discusses | Aegis deadline | generic | event\n"  # noqa: E501
         "Jamie | related_to | entity_3c87170e333ac158c828015896e33f5b881312d3 | person | generic\n"
     )
     status, triples = parse_refinery_output(raw)

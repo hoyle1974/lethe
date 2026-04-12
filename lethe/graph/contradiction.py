@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import logging
 import re
@@ -32,9 +33,7 @@ async def evaluate_relationship_supersedes(
         "If the new fact supersedes exactly one listed fact, respond with only that fact's UUID. "
         "Otherwise respond with exactly: none"
     )
-    user = (
-        f"New Fact:\n{new_fact}\n\nExisting Facts:\n" + "\n".join(lines)
-    )
+    user = f"New Fact:\n{new_fact}\n\nExisting Facts:\n" + "\n".join(lines)
     try:
         text = await llm.dispatch(
             LLMRequest(
@@ -73,8 +72,10 @@ async def tombstone_relationship(
     if not isinstance(meta, dict):
         meta = {}
     meta["deprecated_by"] = new_rel_id
-    await ref.update({
-        "weight": 0.0,
-        "relevance_score": 0.0,
-        "metadata": json.dumps(meta),
-    })
+    await ref.update(
+        {
+            "weight": 0.0,
+            "relevance_score": 0.0,
+            "metadata": json.dumps(meta),
+        }
+    )

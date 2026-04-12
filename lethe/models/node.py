@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from lethe.constants import DEFAULT_DOMAIN, DEFAULT_USER_ID

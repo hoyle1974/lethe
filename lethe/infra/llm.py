@@ -11,5 +11,4 @@ class LLMRequest:
 
 @runtime_checkable
 class LLMDispatcher(Protocol):
-    async def dispatch(self, req: LLMRequest) -> str:
-        ...
+    async def dispatch(self, req: LLMRequest) -> str: ...

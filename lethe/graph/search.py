@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import math
 from datetime import datetime, timezone
@@ -8,7 +9,6 @@ from google.cloud import firestore
 
 from lethe.config import Config
 from lethe.constants import (
-    DEFAULT_USER_ID,
     EMBEDDING_TASK_RETRIEVAL_QUERY,
     LOG_NODE_HALF_LIFE_DAYS,
     NODE_TYPE_ENTITY,
@@ -16,9 +16,9 @@ from lethe.constants import (
     NODE_TYPE_RELATIONSHIP,
     STRUCTURED_NODE_HALF_LIFE_DAYS,
 )
-from lethe.graph.ensure_node import doc_to_node, parse_to_utc
+from lethe.graph.ensure_node import doc_to_node
 from lethe.infra.embedder import Embedder
-from lethe.infra.fs_helpers import Vector, DistanceMeasure, FieldFilter
+from lethe.infra.fs_helpers import DistanceMeasure, FieldFilter, Vector
 from lethe.models.node import Node
 
 log = logging.getLogger(__name__)
@@ -65,7 +65,6 @@ def effective_distance_decay(
     if denom <= 0.0:
         return raw_distance
     return raw_distance / denom
-
 
 
 async def vector_search(
@@ -128,9 +127,7 @@ async def execute_search(
 ) -> list[Node]:
     query_vector = await embedder.embed(query, EMBEDDING_TASK_RETRIEVAL_QUERY)
     pool = min(max(limit * 5, limit), _SEARCH_POOL_MAX)
-    scored = await vector_search(
-        db, config, query_vector, node_types, domain, user_id, pool
-    )
+    scored = await vector_search(db, config, query_vector, node_types, domain, user_id, pool)
     now_utc = datetime.now(timezone.utc)
     decorated = [
         (node, effective_distance_decay(node, raw_distance, now_utc))

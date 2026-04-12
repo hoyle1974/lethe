@@ -1,6 +1,12 @@
 from lethe.models.node import (
-    Node, IngestRequest, IngestResponse,
-    SearchRequest, GraphExpandRequest, GraphExpandResponse, GraphSummarizeResponse, Edge,
+    Edge,
+    GraphExpandRequest,
+    GraphExpandResponse,
+    GraphSummarizeResponse,
+    IngestRequest,
+    IngestResponse,
+    Node,
+    SearchRequest,
 )
 
 
