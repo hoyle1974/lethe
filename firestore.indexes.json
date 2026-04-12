@@ -38,22 +38,6 @@
       "collectionGroup": "nodes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "object_uuid", "order": "ASCENDING" },
-        { "fieldPath": "user_id", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "nodes",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "entity_links", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "user_id", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "nodes",
-      "queryScope": "COLLECTION",
-      "fields": [
         { "fieldPath": "user_id", "order": "ASCENDING" },
         { "fieldPath": "node_type", "order": "ASCENDING" },
         { "fieldPath": "domain", "order": "ASCENDING" }
@@ -93,12 +77,50 @@
       ]
     },
     {
-      "collectionGroup": "nodes",
+      "collectionGroup": "relationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "subject_uuid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "relationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "object_uuid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "relationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": { "dimension": 768, "flat": {} }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "relationships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "domain", "order": "ASCENDING" },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": { "dimension": 768, "flat": {} }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "relationships",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "user_id", "order": "ASCENDING" },
         { "fieldPath": "subject_uuid", "order": "ASCENDING" },
-        { "fieldPath": "node_type", "order": "ASCENDING" },
         { "fieldPath": "updated_at", "order": "DESCENDING" }
       ]
     }
@@ -106,6 +128,15 @@
   "fieldOverrides": [
     {
       "collectionGroup": "nodes",
+      "fieldPath": "embedding",
+      "indexes": [],
+      "vectorConfig": {
+        "dimension": 768,
+        "flat": {}
+      }
+    },
+    {
+      "collectionGroup": "relationships",
       "fieldPath": "embedding",
       "indexes": [],
       "vectorConfig": {
