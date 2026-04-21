@@ -6,10 +6,26 @@ import pytest
 
 from lethe.graph.ensure_node import doc_to_node, parse_to_utc
 from lethe.graph.search import (
+    _search_pool_size,
     cosine_similarity,
     effective_distance_decay,
 )
 from lethe.models.node import Node
+
+# --- _search_pool_size ---
+
+
+def test_search_pool_size_scales_by_five():
+    assert _search_pool_size(10) == 50
+
+
+def test_search_pool_size_capped_at_max():
+    assert _search_pool_size(50) == 200  # 50*5=250 > _SEARCH_POOL_MAX=200
+
+
+def test_search_pool_size_zero_limit_returns_one():
+    assert _search_pool_size(0) == 1
+
 
 # --- cosine_similarity ---
 

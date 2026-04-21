@@ -28,6 +28,10 @@ _REINFORCEMENT_MAX_ENTRIES = 50
 _SEARCH_POOL_MAX = 200
 
 
+def _search_pool_size(limit: int) -> int:
+    return min(max(limit * 5, 1), _SEARCH_POOL_MAX)
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     mag_a = math.sqrt(sum(x * x for x in a))
@@ -166,7 +170,7 @@ async def execute_search(
     min_significance: float,
 ) -> tuple[list[Node], list[Edge]]:
     query_vector = await embedder.embed(query, EMBEDDING_TASK_RETRIEVAL_QUERY)
-    pool = min(max(limit * 5, limit), _SEARCH_POOL_MAX)
+    pool = _search_pool_size(limit)
 
     node_scored, edge_scored = await asyncio.gather(
         vector_search(db, config, query_vector, node_types, domain, user_id, pool),

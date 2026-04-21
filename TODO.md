@@ -25,7 +25,7 @@
 
 - [ ] **`deps.py:23-25`** — Cache canonical map in `app.state` during lifespan instead of re-fetching Firestore on every request; invalidate on mutation
 - [ ] **`routers/admin.py:58-69`** — Backfill endpoint: use `embed_batch`, add a request timeout, and consider a background task with status polling instead of sequential per-doc embed+write
-- [ ] **`graph/search.py:169`** — Fix dead branch: `max(limit * 5, limit)` always equals `limit * 5`; simplify to `min(limit * 5, _SEARCH_POOL_MAX)` or `min(max(limit * 5, 1), _SEARCH_POOL_MAX)`
+- [x] **`graph/search.py:169`** — Fix dead branch: `max(limit * 5, limit)` always equals `limit * 5`; simplify to `min(limit * 5, _SEARCH_POOL_MAX)` or `min(max(limit * 5, 1), _SEARCH_POOL_MAX)`
 - [ ] **`ensure_node.py` / `ingest.py`** — Consolidate `_ENTITY_DOC_ID_RE` and `_GENERATED_ID_RE` into a single shared regex in `lethe/graph/ids.py`; the narrower pattern misses `rel_<sha1>` IDs
 
 ## FastAPI / Code Structure
