@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
+import lethe.infra.gemini as gemini_mod
 from lethe.config import Config
 from lethe.infra.gemini import GeminiLLM
 from lethe.infra.llm import LLMRequest
@@ -100,3 +104,44 @@ async def test_dispatch_retries_max_tokens_empty_response_once(monkeypatch):
 
     assert result.startswith("status: ok")
     assert aio_models.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_dispatch_propagates_exception_from_generate(monkeypatch):
+    """Exceptions from _generate must propagate out of dispatch, not be swallowed."""
+
+    async def _raising_generate(*_args, **_kwargs):
+        raise RuntimeError("simulated LLM error")
+
+    monkeypatch.setattr(
+        "lethe.infra.gemini._build_gemini_client",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=_raising_generate))
+        ),
+    )
+
+    llm = GeminiLLM(Config(google_cloud_project="test-project"))
+    with pytest.raises(RuntimeError, match="simulated LLM error"):
+        await llm.dispatch(LLMRequest(system_prompt="", user_prompt="hello"))
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_new_gemini_client_builder(monkeypatch: pytest.MonkeyPatch):
+    fake_response = SimpleNamespace(text="ok")
+
+    async def _fake_generate(*_args, **_kwargs):
+        return fake_response
+
+    fake_aio_models = SimpleNamespace(generate_content=_fake_generate)
+    fake_client = SimpleNamespace(aio=SimpleNamespace(models=fake_aio_models))
+    build_client = MagicMock(return_value=fake_client)
+
+    monkeypatch.setattr(gemini_mod, "_build_gemini_client", build_client, raising=False)
+
+    llm = GeminiLLM(Config(google_cloud_project="test-project"))
+    req = LLMRequest(system_prompt="system", user_prompt="hello", max_tokens=64)
+
+    result = await llm.dispatch(req)
+
+    assert result == "ok"
+    build_client.assert_called_once()

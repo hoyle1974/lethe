@@ -50,7 +50,6 @@ async def tombstone_relationship(
     db: firestore.AsyncClient,
     collection_name: str,
     old_rel_id: str,
-    new_rel_id: str,
 ) -> None:
     ref = db.collection(collection_name).document(old_rel_id)
     snap = await ref.get()

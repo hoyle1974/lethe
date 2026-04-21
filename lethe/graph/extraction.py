@@ -15,24 +15,6 @@ from lethe.infra.llm import LLMDispatcher, LLMRequest
 
 log = logging.getLogger(__name__)
 
-_PRONOUNS = {
-    "i",
-    "me",
-    "my",
-    "myself",
-    "mine",
-    "we",
-    "us",
-    "our",
-    "ours",
-    "ourselves",
-    "you",
-    "your",
-    "yours",
-    "yourself",
-    "yourselves",
-}
-
 _PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
 _REFINERY_TEMPLATE = None
 
@@ -63,13 +45,6 @@ class RefineryTriple:
             self.canonical_predicate = normalized_predicate(self.predicate[4:].strip())
         else:
             self.canonical_predicate = normalized_predicate(self.predicate)
-
-
-def resolve_pronoun(term: str, owner_name: str = "") -> str | None:
-    """Return resolved term, or None if it's an unresolvable pronoun."""
-    if term.lower() in _PRONOUNS:
-        return owner_name if owner_name else None
-    return term
 
 
 def parse_refinery_output(raw: str) -> tuple[str, list[RefineryTriple]]:

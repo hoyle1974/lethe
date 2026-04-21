@@ -414,3 +414,36 @@ def test_graph_summarize_question_query_returns_answer_evidence_shape(mock_embed
     assert "Answer:" in body["summary"]
     assert "Evidence:" in body["summary"]
     assert body["debug_reasoning"]["question_query_mode"] is True
+
+
+# --- Task 3: EMBEDDING_TASK_RETRIEVAL_DOCUMENT removed from admin.py backfill ---
+
+
+def test_backfill_does_not_pass_explicit_embedding_task():
+    """The backfill endpoint must call embedder.embed(content) without an explicit task arg."""
+    import inspect
+
+    import lethe.routers.admin as m
+
+    src = inspect.getsource(m.backfill)
+    assert "EMBEDDING_TASK_RETRIEVAL_DOCUMENT" not in src, (
+        "backfill still passes EMBEDDING_TASK_RETRIEVAL_DOCUMENT explicitly; "
+        "remove it — it's the default"
+    )
+
+
+# --- Task 4: db, embedder, llm type annotations in ingest.py ---
+
+
+def test_ingest_router_has_typed_dependencies():
+    """db, embedder, and llm in ingest must have explicit type annotations."""
+    import inspect
+
+    import lethe.routers.ingest as m
+
+    src = inspect.getsource(m.ingest)
+    assert "db: firestore.AsyncClient" in src, (
+        "ingest is missing 'db: firestore.AsyncClient' annotation"
+    )
+    assert "embedder: Embedder" in src, "ingest is missing 'embedder: Embedder' annotation"
+    assert "llm: LLMDispatcher" in src, "ingest is missing 'llm: LLMDispatcher' annotation"

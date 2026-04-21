@@ -91,7 +91,7 @@ class GeminiLLM:
             return "status: none\ntriples:\n"
         except Exception as e:
             log.warning("GeminiLLM.dispatch generation failed (likely safety filter): %s", e)
-            return "status: none\ntriples:\n"
+            raise
 
     async def _generate(self, req: LLMRequest, max_tokens: int) -> object:
         config_kwargs: dict[str, object] = {"max_output_tokens": max_tokens}

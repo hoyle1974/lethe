@@ -147,3 +147,25 @@ def test_create_relationship_node_targets_relationships_collection():
     # Confirm the old nodes-collection reference is gone from this function
     fn_body = src.split("def create_relationship_node")[1]
     assert "lethe_collection" not in fn_body
+
+
+# --- Task 1: NODE_TYPE_RELATIONSHIP removed from constants ---
+
+
+def test_node_type_relationship_not_in_constants():
+    """NODE_TYPE_RELATIONSHIP is dead code and must not be exported from lethe.constants."""
+    import lethe.constants as m
+
+    assert not hasattr(m, "NODE_TYPE_RELATIONSHIP"), (
+        "NODE_TYPE_RELATIONSHIP still exists in lethe.constants; delete it"
+    )
+
+
+# --- Task 2: CoreNodeType removed from types ---
+
+
+def test_core_node_type_not_in_types():
+    """CoreNodeType is unused and must not be exported from lethe.types."""
+    import lethe.types as m
+
+    assert not hasattr(m, "CoreNodeType"), "CoreNodeType still exists in lethe.types; delete it"

@@ -6,8 +6,3 @@ EmbeddingTaskType: TypeAlias = Literal[
     "RETRIEVAL_DOCUMENT",
     "RETRIEVAL_QUERY",
 ]
-
-CoreNodeType: TypeAlias = Literal[
-    "log",
-    "entity",
-]

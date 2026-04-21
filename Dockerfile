@@ -11,4 +11,6 @@ ENV PYTHONUNBUFFERED=1
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 
+HEALTHCHECK CMD curl -f http://localhost:8080/v1/health || exit 1
+
 CMD ["uvicorn", "lethe.main:app", "--host", "0.0.0.0", "--port", "8080"]

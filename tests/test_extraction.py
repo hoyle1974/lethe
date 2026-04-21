@@ -1,7 +1,7 @@
+import lethe.graph.extraction as _extraction_module
 from lethe.graph.extraction import (
     build_refinery_prompt,
     parse_refinery_output,
-    resolve_pronoun,
 )
 
 
@@ -56,21 +56,6 @@ def test_parse_refinery_output_keeps_generated_id_terms_for_downstream_resolutio
     assert len(triples) == 2
 
 
-def test_resolve_pronoun_drops_first_person_without_owner():
-    result = resolve_pronoun("I", owner_name="")
-    assert result is None
-
-
-def test_resolve_pronoun_replaces_with_owner():
-    result = resolve_pronoun("I", owner_name="Alice")
-    assert result == "Alice"
-
-
-def test_resolve_pronoun_passthrough_for_names():
-    result = resolve_pronoun("Bob", owner_name="")
-    assert result == "Bob"
-
-
 def test_build_refinery_prompt_contains_text():
     prompt = build_refinery_prompt(
         node_types=["person", "generic"],
@@ -80,3 +65,29 @@ def test_build_refinery_prompt_contains_text():
     assert "Alice joined Acme." in prompt
     assert "person" in prompt
     assert "works_at" in prompt
+
+
+def test_resolve_pronoun_not_in_extraction_module():
+    assert not hasattr(_extraction_module, "resolve_pronoun"), (
+        "resolve_pronoun should have been removed from lethe.graph.extraction"
+    )
+
+
+def test_build_refinery_prompt_interpolates_owner_name():
+    prompt = build_refinery_prompt(
+        node_types=["person", "generic"],
+        allowed_predicates=["works_at"],
+        text="I joined Acme.",
+        owner_name="Alice",
+    )
+    assert "Alice" in prompt, "owner_name 'Alice' should appear in the rendered prompt"
+
+
+def test_build_refinery_prompt_omits_owner_rule_when_empty():
+    prompt = build_refinery_prompt(
+        node_types=["person", "generic"],
+        allowed_predicates=["works_at"],
+        text="I joined Acme.",
+        owner_name="",
+    )
+    assert "owner_name" not in prompt.lower()

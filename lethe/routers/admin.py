@@ -5,10 +5,7 @@ from google.cloud import firestore
 from pydantic import BaseModel
 
 from lethe.config import Config
-from lethe.constants import (
-    DEFAULT_USER_ID,
-    EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
-)
+from lethe.constants import DEFAULT_USER_ID
 from lethe.deps import (
     get_canonical_map,
     get_config,
@@ -62,7 +59,7 @@ async def backfill(
         content = data.get("content", "")
         if not content:
             continue
-        vector = await embedder.embed(content, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
+        vector = await embedder.embed(content)
         await col.document(doc.id).update({"embedding": Vector(vector)})
         count += 1
         if count >= req.limit:

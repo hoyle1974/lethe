@@ -425,7 +425,5 @@ async def create_relationship_node(
     if superseded_id and superseded_id != rid:
         candidate_ids = {u for u, _ in existing_facts}
         if superseded_id in candidate_ids:
-            await tombstone_relationship(
-                db, config.lethe_relationships_collection, superseded_id, rid
-            )
+            await tombstone_relationship(db, config.lethe_relationships_collection, superseded_id)
     return rid

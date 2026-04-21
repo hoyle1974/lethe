@@ -8,7 +8,6 @@ DEFAULT_DOMAIN = "general"
 # Core node-type identifiers
 NODE_TYPE_LOG = "log"
 NODE_TYPE_ENTITY = "entity"
-NODE_TYPE_RELATIONSHIP = "relationship"
 
 # Embedding task identifiers
 EMBEDDING_TASK_RETRIEVAL_DOCUMENT = "RETRIEVAL_DOCUMENT"
