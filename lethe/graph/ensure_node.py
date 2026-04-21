@@ -16,7 +16,6 @@ from lethe.constants import (
     DEFAULT_RELATIONSHIP_WEIGHT,
     DEFAULT_USER_ID,
     EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
-    NODE_TYPE_ENTITY,
     RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT,
 )
 from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
@@ -221,7 +220,7 @@ async def ensure_node(
             "node_type": "person",
             "content": clean,
             "name_key": clean.lower(),
-            "domain": NODE_TYPE_ENTITY,
+            "domain": DEFAULT_DOMAIN,
             "weight": DEFAULT_ENTITY_WEIGHT,
             "metadata": "{}",
             "journal_entry_ids": [source_entry_id] if source_entry_id else [],
@@ -312,7 +311,7 @@ async def ensure_node(
         "node_type": node_type,
         "content": clean,
         "name_key": name_key,
-        "domain": NODE_TYPE_ENTITY,
+        "domain": DEFAULT_DOMAIN,
         "weight": DEFAULT_ENTITY_WEIGHT,
         "metadata": "{}",
         "journal_entry_ids": [source_entry_id] if source_entry_id else [],

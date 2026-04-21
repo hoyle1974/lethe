@@ -110,6 +110,18 @@ def test_add_entity_link_does_not_exist():
     )
 
 
+def test_new_node_data_uses_default_domain():
+    """node_data dicts in ensure_node must set domain=DEFAULT_DOMAIN, not NODE_TYPE_ENTITY."""
+    import inspect
+
+    import lethe.graph.ensure_node as m
+
+    src = inspect.getsource(m.ensure_node)
+    assert '"domain": NODE_TYPE_ENTITY' not in src, (
+        "ensure_node sets domain=NODE_TYPE_ENTITY; use DEFAULT_DOMAIN instead"
+    )
+
+
 def test_create_relationship_node_targets_relationships_collection():
     """create_relationship_node must use lethe_relationships_collection, not lethe_collection."""
     import inspect
