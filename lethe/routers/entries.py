@@ -8,7 +8,7 @@ from google.cloud import firestore
 from lethe.config import Config
 from lethe.constants import DEFAULT_USER_ID, NODE_TYPE_LOG
 from lethe.deps import get_config, get_db
-from lethe.graph.search import doc_to_node
+from lethe.graph.serialization import doc_to_node
 from lethe.models.node import Node
 
 router = APIRouter()

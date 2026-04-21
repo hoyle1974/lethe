@@ -15,8 +15,9 @@ from lethe.constants import (
     TRAVERSE_BATCH_SIZE,
     TRAVERSE_NEIGHBOR_QUERY_LIMIT,
 )
-from lethe.graph.ensure_node import doc_to_edge, stable_self_id
-from lethe.graph.search import cosine_similarity, doc_to_node
+from lethe.graph.ensure_node import stable_self_id
+from lethe.graph.search import cosine_similarity
+from lethe.graph.serialization import doc_to_edge, doc_to_node
 from lethe.infra.embedder import Embedder
 from lethe.models.node import Edge, GraphExpandResponse, Node
 

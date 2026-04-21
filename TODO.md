@@ -32,7 +32,7 @@
 
 - [x] **`routers/ingest.py:15-17`** — Add type annotations to dependencies (`db: firestore.AsyncClient`, `embedder: Embedder`, `llm: LLMDispatcher`) to match all other routers
 - [x] **`deps.py:7-20`** — Make all dependency functions consistently plain `def` (not mixed `def`/`async def`); pure `app.state` attribute access does not need to be async
-- [ ] **`ensure_node.py` / `search.py`** — Move `doc_to_node` and `doc_to_edge` to `lethe/graph/serialization.py`; update all import sites to avoid the transitive re-export through `search.py`
+- [x] **`ensure_node.py` / `search.py`** — Move `doc_to_node` and `doc_to_edge` to `lethe/graph/serialization.py`; update all import sites to avoid the transitive re-export through `search.py`
 
 ## Tests
 

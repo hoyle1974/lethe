@@ -4,12 +4,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from lethe.graph.ensure_node import doc_to_node, parse_to_utc
 from lethe.graph.search import (
     _search_pool_size,
     cosine_similarity,
     effective_distance_decay,
 )
+from lethe.graph.serialization import doc_to_node, parse_to_utc
 from lethe.models.node import Node
 
 # --- _search_pool_size ---

@@ -16,7 +16,7 @@ from lethe.constants import (
     NODE_TYPE_LOG,
     STRUCTURED_NODE_HALF_LIFE_DAYS,
 )
-from lethe.graph.ensure_node import doc_to_edge, doc_to_node
+from lethe.graph.serialization import doc_to_edge, doc_to_node
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import DistanceMeasure, FieldFilter, Vector
 from lethe.models.node import Edge, Node

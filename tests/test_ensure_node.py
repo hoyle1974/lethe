@@ -62,7 +62,7 @@ def test_looks_like_entity_doc_id():
 
 
 def test_doc_to_edge_populates_all_fields():
-    from lethe.graph.ensure_node import doc_to_edge
+    from lethe.graph.serialization import doc_to_edge
 
     data = {
         "subject_uuid": "entity_aaa",
@@ -89,7 +89,7 @@ def test_doc_to_edge_populates_all_fields():
 
 
 def test_doc_to_edge_strips_vector_distance():
-    from lethe.graph.ensure_node import doc_to_edge
+    from lethe.graph.serialization import doc_to_edge
 
     data = {
         "subject_uuid": "s",
