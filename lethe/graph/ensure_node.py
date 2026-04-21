@@ -19,6 +19,7 @@ from lethe.constants import (
     RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT,
 )
 from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
+from lethe.graph.ids import GENERATED_ID_RE
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import ArrayUnion, DistanceMeasure, FieldFilter, Vector
 from lethe.infra.llm import LLMDispatcher
@@ -51,9 +52,6 @@ def parse_to_utc(value: object) -> Optional[datetime]:
         except (TypeError, OSError, ValueError):
             pass
     return None
-
-
-_ENTITY_DOC_ID_RE = re.compile(r"^entity_[0-9a-f]{40}$", re.IGNORECASE)
 
 
 def stable_entity_doc_id(node_type: str, name: str) -> str:
@@ -341,7 +339,7 @@ async def ensure_node(
 
 
 def _looks_like_entity_doc_id(identifier: str) -> bool:
-    return bool(_ENTITY_DOC_ID_RE.fullmatch(identifier.strip()))
+    return bool(GENERATED_ID_RE.fullmatch(identifier.strip()))
 
 
 async def create_relationship_node(

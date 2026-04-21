@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -26,6 +25,7 @@ from lethe.graph.ensure_node import (
     stable_self_id,
 )
 from lethe.graph.extraction import RefineryTriple, extract_triples
+from lethe.graph.ids import is_generated_id
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import ArrayUnion, Vector
 from lethe.infra.llm import LLMDispatcher
@@ -33,11 +33,6 @@ from lethe.models.node import IngestResponse, Node
 
 log = logging.getLogger(__name__)
 
-_GENERATED_ID_RE = re.compile(r"^(?:entity|rel)_[0-9a-f]{40}$", re.IGNORECASE)
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-    re.IGNORECASE,
-)
 _PLACEHOLDER_TERMS = {
     DEFAULT_NODE_TYPE,
     "unknown",
@@ -239,8 +234,7 @@ async def _node_exists(db, config, node_type: str, name: str) -> bool:
 
 
 def _looks_like_generated_id(value: str) -> bool:
-    s = value.strip()
-    return bool(_GENERATED_ID_RE.fullmatch(s) or _UUID_RE.fullmatch(s))
+    return is_generated_id(value.strip())
 
 
 async def _resolve_term(
