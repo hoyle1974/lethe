@@ -122,6 +122,18 @@ def test_new_node_data_uses_default_domain():
     )
 
 
+def test_collision_update_reuses_computed_vector():
+    """collision update must use the already-computed vector, not call embedder.embed again."""
+    import inspect
+
+    import lethe.graph.ensure_node as m
+
+    src = inspect.getsource(m.ensure_node)
+    assert "new_vector = await embedder.embed" not in src, (
+        "ensure_node calls embedder.embed twice on collision update; reuse `vector` instead"
+    )
+
+
 def test_create_relationship_node_targets_relationships_collection():
     """create_relationship_node must use lethe_relationships_collection, not lethe_collection."""
     import inspect

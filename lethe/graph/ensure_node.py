@@ -260,12 +260,11 @@ async def ensure_node(
 
             action = await evaluate_fact_collision(llm, clean, nearest.content)
             if action == "update":
-                new_vector = await embedder.embed(clean, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
                 await collection.document(nearest.uuid).update(
                     {
                         "content": clean,
                         "name_key": clean.lower(),
-                        "embedding": Vector(new_vector),
+                        "embedding": Vector(vector),
                         "updated_at": _now_iso(),
                     }
                 )
