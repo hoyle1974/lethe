@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from lethe.graph.ensure_node import stable_self_id
-from lethe.graph.ingest import _looks_like_generated_id, _looks_like_placeholder_term, _resolve_term
+from lethe.graph.ingest import (
+    _get_or_create_entity_node,
+    _looks_like_generated_id,
+    _looks_like_placeholder_term,
+    _resolve_term,
+)
 
 
 def _config():
@@ -113,3 +118,41 @@ async def test_resolve_term_rejects_unresolvable_internal_id():
         "generic",
     )
     assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_entity_node_skips_update_when_doc_deleted():
+    """If an existing_uuid doc was deleted between resolve and write, update must not be called."""
+    from lethe.models.node import Node
+
+    cfg = _config()
+
+    snap = SimpleNamespace(exists=False)
+    doc_ref = MagicMock()
+    doc_ref.get = AsyncMock(return_value=snap)
+    doc_ref.update = AsyncMock()
+
+    collection = MagicMock()
+    collection.document.return_value = doc_ref
+
+    db = MagicMock()
+    db.collection.return_value = collection
+
+    fallback_node = Node(uuid="new-uuid", node_type="person", content="Alice")
+    resolved_term = {"text": "Alice", "existing_uuid": "entity_abc", "self_token": False}
+
+    with patch("lethe.graph.ingest.ensure_node", AsyncMock(return_value=fallback_node)):
+        _, node = await _get_or_create_entity_node(
+            db=db,
+            embedder=MagicMock(),
+            llm=MagicMock(),
+            config=cfg,
+            resolved_term=resolved_term,
+            fallback_type="person",
+            entry_uuid="entry-1",
+            ts="2026-01-01T00:00:00Z",
+            user_id="global",
+        )
+
+    doc_ref.update.assert_not_called()
+    assert node.uuid == "new-uuid"

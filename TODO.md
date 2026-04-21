@@ -3,7 +3,7 @@
 ## Critical Bugs
 
 - [x] **`ensure_node.py:252-264`** — Remove duplicate embedding call on collision update; use already-computed `vector` instead of re-calling `embedder.embed` with identical inputs
-- [ ] **`ingest.py:307-328`** — Guard `_get_or_create_entity_node` against calling `.update()` on a non-existent Firestore document (deleted between resolve and write)
+- [x] **`ingest.py:307-328`** — Guard `_get_or_create_entity_node` against calling `.update()` on a non-existent Firestore document (deleted between resolve and write)
 - [x] **`ensure_node.py:224,315`** — Replace `NODE_TYPE_ENTITY` with `DEFAULT_DOMAIN` for the `domain` field; node type identifier is being used as a domain value, breaking domain-filtered queries
 - [x] **`infra/gemini.py:92-94`** — Exception path returns `"status: none\ntriples:\n"`, indistinguishable from a legitimate empty response; raise or return a typed error result
 - [ ] **`routers/entries.py:46,56` / `routers/nodes.py:44,56`** — Client-side type filtering silently truncates results when matching docs are sparse; add composite Firestore index on `(user_id, node_type)` and filter server-side

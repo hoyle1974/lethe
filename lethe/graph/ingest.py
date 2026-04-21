@@ -320,6 +320,19 @@ async def _get_or_create_entity_node(
                 llm=llm,
             )
             return False, node
+        elif not snap.exists:
+            node = await ensure_node(
+                db=db,
+                embedder=embedder,
+                config=config,
+                identifier=resolved_term["text"],
+                node_type=fallback_type,
+                source_entry_id=entry_uuid,
+                timestamp=ts,
+                user_id=user_id,
+                llm=llm,
+            )
+            return False, node
         await ref.update(
             {
                 "journal_entry_ids": ArrayUnion([entry_uuid]),
