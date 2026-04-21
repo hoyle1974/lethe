@@ -76,7 +76,7 @@ class SearchResponse(BaseModel):
 
 class GraphExpandRequest(BaseModel):
     seed_ids: list[str]
-    query: Optional[str] = None
+    query: Optional[str] = Field(default=None, max_length=500)
     hops: int = 2
     limit_per_edge: int = 20
     self_seed_neighbor_floor: int = 40

@@ -10,7 +10,7 @@
 
 ## Security
 
-- [ ] **`routers/graph.py:159-199`** — `req.query` is interpolated directly into the LLM system prompt; wrap in a delimited block and enforce max length on `GraphExpandRequest`
+- [x] **`routers/graph.py:159-199`** — `req.query` is interpolated directly into the LLM system prompt; wrap in a delimited block and enforce max length on `GraphExpandRequest`
 
 ## Unused / Dead Code
 

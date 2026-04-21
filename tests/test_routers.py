@@ -1,6 +1,7 @@
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from lethe.graph.canonical_map import CanonicalMap
@@ -447,3 +448,45 @@ def test_ingest_router_has_typed_dependencies():
     )
     assert "embedder: Embedder" in src, "ingest is missing 'embedder: Embedder' annotation"
     assert "llm: LLMDispatcher" in src, "ingest is missing 'llm: LLMDispatcher' annotation"
+
+
+# --- Security: GraphExpandRequest query length + prompt delimiter ---
+
+
+def test_graph_expand_request_rejects_query_over_500_chars():
+    from pydantic import ValidationError
+
+    from lethe.models.node import GraphExpandRequest
+
+    with pytest.raises(ValidationError):
+        GraphExpandRequest(seed_ids=[], query="x" * 501)
+
+
+def test_graph_expand_request_accepts_query_at_500_chars():
+    from lethe.models.node import GraphExpandRequest
+
+    req = GraphExpandRequest(seed_ids=[], query="x" * 500)
+    assert len(req.query) == 500
+
+
+def test_safe_query_wraps_in_delimiters():
+    from lethe.routers.graph import _safe_query
+
+    assert _safe_query("find Alice") == "<query>find Alice</query>"
+
+
+def test_safe_query_empty_string():
+    from lethe.routers.graph import _safe_query
+
+    assert _safe_query("") == "<query></query>"
+
+
+def test_summarize_system_prompts_use_safe_query():
+    """Raw {q} must not appear in system-prompt f-strings; _safe_query must gate all uses."""
+    import inspect
+
+    import lethe.routers.graph as m
+
+    src = inspect.getsource(m.summarize)
+    assert "_safe_query" in src, "summarize must use _safe_query to wrap user query in prompts"
+    assert 'f"...{q}' not in src, "raw {q} interpolation found in summarize prompt strings"

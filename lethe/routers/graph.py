@@ -42,6 +42,10 @@ def _extract_target_queries(raw: str) -> list[str]:
     return candidates[:3]
 
 
+def _safe_query(q: str) -> str:
+    return f"<query>{q}</query>"
+
+
 def _is_broad_query(query: str) -> bool:
     parts = [p for p in re.split(r"\s+", (query or "").strip()) if p]
     return len(parts) <= 2
@@ -155,10 +159,11 @@ async def summarize(
         len(expanded.edges),
     )
     q = req.query if req.query is not None else ""
+    sq = _safe_query(q)
     if question_query_mode:
         system = (
             "You are a query-resolution RAG engine. "
-            f"Resolve the user query using only graph evidence: {q}. "
+            f"Resolve the user query using only graph evidence: {sq}. "
             "Return markdown with sections:\n"
             "Answer: direct response to the query.\n"
             "Evidence: bullet points with the most relevant supporting facts.\n"
@@ -167,7 +172,7 @@ async def summarize(
         )
     elif broad_query_mode:
         system = (
-            f"You are a knowledge summarization engine. The subject is: {q}. "
+            f"You are a knowledge summarization engine. The subject is: {sq}. "
             "Using ALL graph evidence provided, write a comprehensive profile summary. "
             "Cover every domain present in the graph: professional role, projects, tasks, "
             "relationships, personal life, home, family, pets, plans, "
@@ -183,7 +188,7 @@ async def summarize(
     else:
         system = (
             "You are a query-resolution RAG engine. Resolve this free-form query "
-            f"using only graph evidence: {q}. Return markdown with sections:\n"
+            f"using only graph evidence: {sq}. Return markdown with sections:\n"
             "Response: concise synthesis or recommended resolution grounded in facts.\n"
             "Evidence: bullet points with concrete supporting facts.\n"
             "Gaps: what is unknown, missing, or uncertain.\n"
@@ -191,7 +196,7 @@ async def summarize(
             "Do not use conversational filler."
         )
     thought_system = (
-        f"Query focus: {q}. Based on the current graph data and this query, "
+        f"Query focus: {_safe_query(q)}. Based on the current graph data and this query, "
         "identify missing entities or relationships that would make this summary more complete? "
         "Reply with up to 3 short retrieval queries "
         "(entity names, relationship phrases, or topics), one per line, or 'NONE'. "
@@ -321,7 +326,7 @@ async def summarize(
                 "The previous answer was too brief. Rewrite with sections:\n"
                 "Answer:\nEvidence:\nGaps:\n"
                 "Use concrete supporting facts from the graph and explicitly note unknowns.\n\n"
-                f"Query: {q}\n\n"
+                f"Query: {_safe_query(q)}\n\n"
                 f"Graph:\n{final_md}"
             )
         elif broad_query_mode:
@@ -329,14 +334,14 @@ async def summarize(
                 "The previous response was too brief. Write a comprehensive profile with sections "
                 "Profile, Work & Projects, Relationships, Personal & Home, and Open Items. "
                 "Include ALL topics from the graph.\n\n"
-                f"Subject: {q}\n\n"
+                f"Subject: {_safe_query(q)}\n\n"
                 f"Graph:\n{final_md}"
             )
         else:
             retry_prompt = (
                 "The previous response was too brief. Rewrite as a compact markdown "
                 "query-resolution brief with sections Response, Evidence, and Gaps.\n\n"
-                f"Query: {q}\n\n"
+                f"Query: {_safe_query(q)}\n\n"
                 f"Graph:\n{final_md}"
             )
         final_summary = await llm.dispatch(
