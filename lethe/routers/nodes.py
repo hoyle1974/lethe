@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from google.cloud import firestore
 
@@ -28,8 +26,8 @@ async def get_node(
 
 @router.get("/v1/nodes", response_model=list[Node])
 async def list_nodes(
-    node_type: Optional[str] = Query(default=None),
-    domain: Optional[str] = Query(default=None),
+    node_type: str | None = Query(default=None),
+    domain: str | None = Query(default=None),
     user_id: str = Query(default=DEFAULT_USER_ID),
     limit: int = Query(default=20, ge=1, le=500),
     offset: int = Query(default=0, ge=0),

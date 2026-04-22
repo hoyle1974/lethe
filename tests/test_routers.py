@@ -49,7 +49,7 @@ def test_ingest_status_none_returns_entry_uuid(mock_embedder, mock_llm):
 
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
     resp = client.post("/v1/ingest", json={"text": "Hello world"})
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert "entry_uuid" in data
     assert isinstance(data["nodes_created"], list)
@@ -562,7 +562,7 @@ def test_backfill_skips_docs_with_existing_embeddings(mock_embedder, mock_llm):
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
     resp = client.post("/v1/admin/backfill", json={"limit": 10})
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["backfilled"] == 1
     embed_batch_mock.assert_awaited_once()
@@ -591,7 +591,7 @@ def test_backfill_embeds_docs_without_embeddings(mock_embedder, mock_llm):
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
     resp = client.post("/v1/admin/backfill", json={"limit": 10})
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     assert resp.json()["backfilled"] == 2
     assert mock_doc_ref.update.await_count == 2
 

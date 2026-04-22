@@ -47,7 +47,7 @@ def test_graph_expand_request_defaults():
     assert req.user_id == "global"
     assert req.hops == 2
     assert req.limit_per_edge == 20
-    assert req.debug is True
+    assert req.debug is False
     assert req.query is None
 
 

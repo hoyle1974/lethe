@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 from google.cloud import firestore
 
@@ -12,7 +14,7 @@ from lethe.models.node import IngestRequest, IngestResponse
 router = APIRouter()
 
 
-@router.post("/v1/ingest", response_model=IngestResponse)
+@router.post("/v1/ingest", response_model=IngestResponse, status_code=201)
 async def ingest(
     req: IngestRequest,
     db: firestore.AsyncClient = Depends(get_db),

@@ -4,7 +4,7 @@ import logging
 import os
 from dataclasses import dataclass
 
-from jinja2 import BaseLoader, Environment
+from jinja2 import BaseLoader, Environment, Template
 
 from lethe.constants import (
     DEFAULT_NODE_TYPE,
@@ -19,7 +19,7 @@ _PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts"
 _REFINERY_TEMPLATE = None
 
 
-def _get_refinery_template():
+def _get_refinery_template() -> Template:
     global _REFINERY_TEMPLATE
     if _REFINERY_TEMPLATE is None:
         path = os.path.join(_PROMPT_DIR, "refinery.txt")
@@ -39,7 +39,7 @@ class RefineryTriple:
     is_new_predicate: bool = False
     canonical_predicate: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.predicate.upper().startswith("NEW:"):
             self.is_new_predicate = True
             self.canonical_predicate = normalized_predicate(self.predicate[4:].strip())

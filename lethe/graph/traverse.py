@@ -19,6 +19,7 @@ from lethe.graph.ensure_node import stable_self_id
 from lethe.graph.search import cosine_similarity
 from lethe.graph.serialization import doc_to_edge, doc_to_node
 from lethe.infra.embedder import Embedder
+from lethe.infra.fs_helpers import FieldFilter
 from lethe.models.node import Edge, GraphExpandResponse, Node
 
 log = logging.getLogger(__name__)
@@ -118,8 +119,6 @@ async def _get_edge_neighbors(
     user_id: str,
 ) -> list[Edge]:
     """Return all edges from the relationships collection where node_uuid is subject or object."""
-    from lethe.infra.fs_helpers import FieldFilter
-
     col = db.collection(config.lethe_relationships_collection)
 
     async def _query_field(field: str) -> list[Edge]:

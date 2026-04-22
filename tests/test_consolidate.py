@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from lethe.graph.canonical_map import CanonicalMap
 from lethe.graph.consolidate import ConsolidationResponse, run_consolidation
 from lethe.models.node import IngestResponse
+from tests.conftest import MockLLM
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -174,10 +175,8 @@ async def test_run_consolidation_returns_statements_and_ingest_results(mock_embe
 # ---------------------------------------------------------------------------
 
 
-def test_post_consolidate_returns_200_with_statements(mock_embedder):
-    """POST /v1/admin/consolidate returns 200 and statements list."""
-    from tests.conftest import MockLLM
-
+def test_post_consolidate_returns_201_with_statements(mock_embedder):
+    """POST /v1/admin/consolidate returns 201 and statements list."""
     doc = _make_mock_doc("I love coffee")
     mock_db = _make_db_with_stream([doc])
     mock_llm = MockLLM("User prefers coffee")
@@ -195,7 +194,7 @@ def test_post_consolidate_returns_200_with_statements(mock_embedder):
         client = _make_test_client(mock_embedder, mock_llm, mock_db)
         resp = client.post("/v1/admin/consolidate", json={"user_id": "test_user"})
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert "statements" in data
     assert data["statements"] == ["User prefers coffee"]

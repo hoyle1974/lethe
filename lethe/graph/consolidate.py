@@ -46,7 +46,7 @@ def _parse_statements(llm_text: str) -> list[str]:
         lines.append(s)
         if len(lines) >= _MAX_STATEMENTS:
             break
-    return lines[:_MAX_STATEMENTS]
+    return lines
 
 
 async def run_consolidation(

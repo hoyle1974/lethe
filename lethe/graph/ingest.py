@@ -150,19 +150,19 @@ async def run_ingest(
 
 
 async def _process_triple(
-    db,
-    embedder,
-    llm,
-    config,
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    llm: LLMDispatcher,
+    config: Config,
     triple: RefineryTriple,
-    entry_uuid,
-    ts,
-    user_id,
-    nodes_created,
-    nodes_updated,
-    relationships_created,
+    entry_uuid: str,
+    ts: str,
+    user_id: str,
+    nodes_created: list[str],
+    nodes_updated: list[str],
+    relationships_created: list[str],
     canonical_map: CanonicalMap,
-):
+) -> str:
     predicate = triple.canonical_predicate
     if triple.is_new_predicate:
         await append_predicate(db, predicate)
@@ -227,19 +227,21 @@ async def _process_triple(
     return "ok"
 
 
-async def _node_exists(db, config, node_type: str, name: str) -> bool:
+def _looks_like_generated_id(value: str) -> bool:
+    return is_generated_id(value.strip())
+
+
+async def _node_exists(
+    db: firestore.AsyncClient, config: Config, node_type: str, name: str
+) -> bool:
     doc_id = stable_entity_doc_id(node_type, name)
     snap = await db.collection(config.lethe_collection).document(doc_id).get()
     return snap.exists
 
 
-def _looks_like_generated_id(value: str) -> bool:
-    return is_generated_id(value.strip())
-
-
 async def _resolve_term(
-    db,
-    config,
+    db: firestore.AsyncClient,
+    config: Config,
     raw_term: str,
     node_type: Optional[str] = None,
     user_id: str = DEFAULT_USER_ID,
@@ -287,16 +289,16 @@ def _looks_like_placeholder_term(value: str, node_type: Optional[str] = None) ->
 
 
 async def _get_or_create_entity_node(
-    db,
-    embedder,
-    llm,
-    config,
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    llm: LLMDispatcher,
+    config: Config,
     resolved_term: dict,
     fallback_type: str,
     entry_uuid: str,
     ts: str,
     user_id: str,
-):
+) -> tuple[bool, Node]:
     existing_uuid = resolved_term.get("existing_uuid")
     if existing_uuid:
         ref = db.collection(config.lethe_collection).document(existing_uuid)

@@ -60,7 +60,7 @@ def _now_iso() -> str:
 
 
 async def _find_nearest_by_type(
-    collection,
+    collection: firestore.AsyncCollectionReference,
     vector: list[float],
     node_type: str,
     threshold: float,

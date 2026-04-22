@@ -45,7 +45,7 @@ class ConsolidateRequest(BaseModel):
     user_id: str = DEFAULT_USER_ID
 
 
-@router.post("/v1/admin/backfill")
+@router.post("/v1/admin/backfill", status_code=201)
 async def backfill(
     req: BackfillRequest,
     db: firestore.AsyncClient = Depends(get_db),
@@ -76,7 +76,7 @@ async def backfill(
     return {"backfilled": len(pending)}
 
 
-@router.post("/v1/admin/consolidate", response_model=ConsolidationResponse)
+@router.post("/v1/admin/consolidate", response_model=ConsolidationResponse, status_code=201)
 async def consolidate(
     req: ConsolidateRequest,
     db: firestore.AsyncClient = Depends(get_db),

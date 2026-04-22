@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -16,12 +15,12 @@ class Node(BaseModel):
     weight: float = 0.5
     metadata: str = "{}"
     journal_entry_ids: list[str] = Field(default_factory=list)
-    name_key: Optional[str] = None
+    name_key: str | None = None
     user_id: str = DEFAULT_USER_ID
-    source: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    embedding: Optional[list[float]] = Field(default=None, exclude=True)
+    source: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    embedding: list[float] | None = Field(default=None, exclude=True)
 
 
 class Edge(BaseModel):
@@ -33,18 +32,18 @@ class Edge(BaseModel):
     weight: float = DEFAULT_RELATIONSHIP_WEIGHT
     domain: str = DEFAULT_DOMAIN
     user_id: str = DEFAULT_USER_ID
-    source: Optional[str] = None
+    source: str | None = None
     journal_entry_ids: list[str] = Field(default_factory=list)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class IngestRequest(BaseModel):
     text: str
     domain: str = DEFAULT_DOMAIN
-    source: Optional[str] = None
+    source: str | None = None
     user_id: str = DEFAULT_USER_ID
-    timestamp: Optional[datetime] = None
+    timestamp: datetime | None = None
 
 
 class IngestResponse(BaseModel):
@@ -57,7 +56,7 @@ class IngestResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     node_types: list[str] = Field(default_factory=list)
-    domain: Optional[str] = None
+    domain: str | None = None
     user_id: str = DEFAULT_USER_ID
     limit: int = 20
     min_significance: float = 0.0
@@ -76,11 +75,11 @@ class SearchResponse(BaseModel):
 
 class GraphExpandRequest(BaseModel):
     seed_ids: list[str]
-    query: Optional[str] = Field(default=None, max_length=500)
+    query: str | None = Field(default=None, max_length=500)
     hops: int = 2
     limit_per_edge: int = 20
     self_seed_neighbor_floor: int = 40
-    debug: bool = True
+    debug: bool = False
     user_id: str = DEFAULT_USER_ID
 
 
@@ -114,4 +113,4 @@ class GraphExpandResponse(BaseModel):
 
 class GraphSummarizeResponse(BaseModel):
     summary: str
-    debug_reasoning: Optional[dict] = None
+    debug_reasoning: dict | None = None

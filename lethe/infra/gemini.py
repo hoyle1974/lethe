@@ -112,8 +112,10 @@ class GeminiLLM:
             text = getattr(response, "text", None)
             if isinstance(text, str) and text.strip():
                 return text
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug(
+                "response.text raised (likely safety filter), falling back to candidates: %s", exc
+            )
 
         candidates = getattr(response, "candidates", None) or []
         for candidate in candidates:

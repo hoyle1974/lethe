@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from google.cloud import firestore
 
@@ -34,7 +32,7 @@ async def list_entries(
     user_id: str = Query(default=DEFAULT_USER_ID),
     limit: int = Query(default=20, ge=1, le=500),
     ascending: bool = Query(default=False),
-    since: Optional[str] = Query(default=None),
+    since: str | None = Query(default=None),
     db: firestore.AsyncClient = Depends(get_db),
     config: Config = Depends(get_config),
 ) -> list[Node]:
