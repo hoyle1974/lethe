@@ -42,7 +42,7 @@
 - [x] **`contradiction.py`** — Add tests for `tombstone_relationship` (exists and not-exists paths)
 - [ ] **`consolidate.py` / `routers/admin.py`** — Add tests for `run_consolidation` and `POST /v1/admin/consolidate`
 - [ ] **`routers/admin.py`** — Add test for `POST /v1/admin/backfill` covering docs with and without embeddings
-- [ ] **`test_routers.py`** — Fix test setup to match production path: `get_canonical_map` calls `load_canonical_map(db)` live; test sets `app.state.canonical_map` which production never sets
+- [x] **`test_routers.py`** — Fix test setup to match production path: `get_canonical_map` calls `load_canonical_map(db)` live; test sets `app.state.canonical_map` which production never sets
 
 ## Configuration / Dependencies
 

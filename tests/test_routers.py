@@ -10,6 +10,7 @@ from lethe.models.node import GraphExpandResponse, Node
 
 def _make_test_client(mock_embedder=None, mock_llm=None, mock_db=None):
     from lethe.config import Config
+    from lethe.deps import get_canonical_map
     from lethe.main import app
 
     with patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "test-proj"}, clear=True):
@@ -19,7 +20,7 @@ def _make_test_client(mock_embedder=None, mock_llm=None, mock_db=None):
     app.state.db = mock_db or MagicMock()
     app.state.embedder = mock_embedder
     app.state.llm = mock_llm
-    app.state.canonical_map = CanonicalMap()
+    app.dependency_overrides[get_canonical_map] = lambda: CanonicalMap()
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -490,3 +491,22 @@ def test_summarize_system_prompts_use_safe_query():
     src = inspect.getsource(m.summarize)
     assert "_safe_query" in src, "summarize must use _safe_query to wrap user query in prompts"
     assert 'f"...{q}' not in src, "raw {q} interpolation found in summarize prompt strings"
+
+
+# --- Test setup: canonical map wiring ---
+
+
+def test_make_test_client_overrides_canonical_map_dependency():
+    """_make_test_client must use dependency_overrides, not app.state.canonical_map."""
+    import inspect
+
+    import tests.test_routers as tr
+
+    src = inspect.getsource(tr._make_test_client)
+    assert "dependency_overrides" in src, (
+        "_make_test_client should use app.dependency_overrides to inject CanonicalMap; "
+        "app.state.canonical_map is never read by get_canonical_map"
+    )
+    assert "app.state.canonical_map" not in src, (
+        "app.state.canonical_map is dead code; get_canonical_map calls load_canonical_map(db) live"
+    )
