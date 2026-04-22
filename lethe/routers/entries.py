@@ -41,14 +41,14 @@ async def list_entries(
     from lethe.infra.fs_helpers import FieldFilter
 
     col = db.collection(config.lethe_collection)
-    # Filter only on user_id server-side; node_type, since, and sort are
-    # handled client-side to avoid composite index requirements.
-    q = col.where(filter=FieldFilter("user_id", "==", user_id)).limit(limit * 10)
+    q = (
+        col.where(filter=FieldFilter("user_id", "==", user_id))
+        .where(filter=FieldFilter("node_type", "==", NODE_TYPE_LOG))
+        .limit(limit)
+    )
     results: list[Node] = []
     async for doc in q.stream():
         data = doc.to_dict() or {}
-        if data.get("node_type") != NODE_TYPE_LOG:
-            continue
         if since and data.get("created_at", "") < since:
             continue
         results.append(doc_to_node(doc.id, data))

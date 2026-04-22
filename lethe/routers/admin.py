@@ -5,7 +5,9 @@ from google.cloud import firestore
 from pydantic import BaseModel
 
 from lethe.config import Config
-from lethe.constants import DEFAULT_USER_ID
+from lethe.constants import (
+    DEFAULT_USER_ID,
+)
 from lethe.deps import (
     get_canonical_map,
     get_config,
@@ -51,20 +53,27 @@ async def backfill(
     config: Config = Depends(get_config),
 ):
     col = db.collection(config.lethe_collection)
-    count = 0
+    # Collect docs needing embeddings
+    pending: list[tuple[str, str]] = []  # (doc_id, content)
     async for doc in col.limit(req.limit * 10).stream():
+        if len(pending) >= req.limit:
+            break
         data = doc.to_dict() or {}
         if data.get("embedding") is not None:
             continue
         content = data.get("content", "")
         if not content:
             continue
-        vector = await embedder.embed(content)
-        await col.document(doc.id).update({"embedding": Vector(vector)})
-        count += 1
-        if count >= req.limit:
-            break
-    return {"backfilled": count}
+        pending.append((doc.id, content))
+
+    if not pending:
+        return {"backfilled": 0}
+
+    doc_ids, contents = zip(*pending)
+    vectors = await embedder.embed_batch(list(contents))
+    for doc_id, vector in zip(doc_ids, vectors):
+        await col.document(doc_id).update({"embedding": Vector(vector)})
+    return {"backfilled": len(pending)}
 
 
 @router.post("/v1/admin/consolidate", response_model=ConsolidationResponse)

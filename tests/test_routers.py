@@ -510,3 +510,99 @@ def test_make_test_client_overrides_canonical_map_dependency():
     assert "app.state.canonical_map" not in src, (
         "app.state.canonical_map is dead code; get_canonical_map calls load_canonical_map(db) live"
     )
+
+
+def test_get_canonical_map_reads_from_app_state_not_firestore():
+    """get_canonical_map must return app.state.canonical_map directly (no Firestore call)."""
+    import inspect
+
+    from lethe.deps import get_canonical_map
+
+    src = inspect.getsource(get_canonical_map)
+    assert "load_canonical_map" not in src, (
+        "get_canonical_map still calls load_canonical_map — it should read from app.state instead"
+    )
+    assert "app.state.canonical_map" in src, (
+        "get_canonical_map must return request.app.state.canonical_map"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Backfill endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def _make_doc_snap(doc_id: str, data: dict):
+    """Create a mock Firestore document snapshot."""
+    snap = MagicMock()
+    snap.id = doc_id
+    snap.to_dict.return_value = data
+    return snap
+
+
+def test_backfill_skips_docs_with_existing_embeddings(mock_embedder, mock_llm):
+    """Docs that already have an embedding field must not be re-embedded."""
+    doc_with_embedding = _make_doc_snap("doc-1", {"content": "hello", "embedding": [0.1] * 768})
+    doc_without_embedding = _make_doc_snap("doc-2", {"content": "world"})
+
+    mock_col = MagicMock()
+    mock_col.limit.return_value.stream = MagicMock(
+        return_value=_async_iter([doc_with_embedding, doc_without_embedding])
+    )
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.update = AsyncMock()
+    mock_col.document.return_value = mock_doc_ref
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value = mock_col
+
+    embed_batch_mock = AsyncMock(return_value=[[0.5] * 768])
+    mock_embedder.embed_batch = embed_batch_mock
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post("/v1/admin/backfill", json={"limit": 10})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["backfilled"] == 1
+    embed_batch_mock.assert_awaited_once()
+    call_args = embed_batch_mock.await_args
+    assert call_args[0][0] == ["world"]
+
+
+def test_backfill_embeds_docs_without_embeddings(mock_embedder, mock_llm):
+    """Docs without embeddings should get embedded and have their Firestore doc updated."""
+    doc_a = _make_doc_snap("doc-a", {"content": "foo"})
+    doc_b = _make_doc_snap("doc-b", {"content": "bar"})
+
+    mock_col = MagicMock()
+    mock_col.limit.return_value.stream = MagicMock(return_value=_async_iter([doc_a, doc_b]))
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.update = AsyncMock()
+    mock_col.document.return_value = mock_doc_ref
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value = mock_col
+
+    vectors = [[0.1] * 768, [0.2] * 768]
+    embed_batch_mock = AsyncMock(return_value=vectors)
+    mock_embedder.embed_batch = embed_batch_mock
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post("/v1/admin/backfill", json={"limit": 10})
+
+    assert resp.status_code == 200
+    assert resp.json()["backfilled"] == 2
+    assert mock_doc_ref.update.await_count == 2
+
+
+def test_backfill_uses_embed_batch(mock_embedder, mock_llm):
+    """Verify via source inspection that embed_batch is used, not sequential embed calls."""
+    import inspect
+
+    import lethe.routers.admin as admin_module
+
+    source = inspect.getsource(admin_module.backfill)
+    assert "embed_batch" in source, "backfill must use embed_batch"
+    lines = [ln for ln in source.splitlines() if "embedder.embed(" in ln]
+    assert lines == [], f"backfill must not call embedder.embed() directly; found: {lines}"

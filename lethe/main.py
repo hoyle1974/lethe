@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from lethe.config import Config
-from lethe.graph.canonical_map import seed_canonical_map
+from lethe.graph.canonical_map import load_canonical_map, seed_canonical_map
 from lethe.infra.firestore import create_firestore_client
 from lethe.infra.gemini import GeminiEmbedder, GeminiLLM
 from lethe.routers import admin
@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     app.state.embedder = GeminiEmbedder(config)
     app.state.llm = GeminiLLM(config)
     await seed_canonical_map(app.state.db)
+    app.state.canonical_map = await load_canonical_map(app.state.db)
     logging.basicConfig(level=config.log_level.upper())
     yield
 

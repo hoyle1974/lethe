@@ -6,7 +6,7 @@
 - [x] **`ingest.py:307-328`** — Guard `_get_or_create_entity_node` against calling `.update()` on a non-existent Firestore document (deleted between resolve and write)
 - [x] **`ensure_node.py:224,315`** — Replace `NODE_TYPE_ENTITY` with `DEFAULT_DOMAIN` for the `domain` field; node type identifier is being used as a domain value, breaking domain-filtered queries
 - [x] **`infra/gemini.py:92-94`** — Exception path returns `"status: none\ntriples:\n"`, indistinguishable from a legitimate empty response; raise or return a typed error result
-- [ ] **`routers/entries.py:46,56` / `routers/nodes.py:44,56`** — Client-side type filtering silently truncates results when matching docs are sparse; add composite Firestore index on `(user_id, node_type)` and filter server-side
+- [x] **`routers/entries.py:46,56` / `routers/nodes.py:44,56`** — Client-side type filtering silently truncates results when matching docs are sparse; add composite Firestore index on `(user_id, node_type)` and filter server-side
 
 ## Security
 
@@ -23,8 +23,8 @@
 
 ## Design / Performance
 
-- [ ] **`deps.py:23-25`** — Cache canonical map in `app.state` during lifespan instead of re-fetching Firestore on every request; invalidate on mutation
-- [ ] **`routers/admin.py:58-69`** — Backfill endpoint: use `embed_batch`, add a request timeout, and consider a background task with status polling instead of sequential per-doc embed+write
+- [x] **`deps.py:23-25`** — Cache canonical map in `app.state` during lifespan instead of re-fetching Firestore on every request; invalidate on mutation
+- [x] **`routers/admin.py:58-69`** — Backfill endpoint: use `embed_batch`, add a request timeout, and consider a background task with status polling instead of sequential per-doc embed+write
 - [x] **`graph/search.py:169`** — Fix dead branch: `max(limit * 5, limit)` always equals `limit * 5`; simplify to `min(limit * 5, _SEARCH_POOL_MAX)` or `min(max(limit * 5, 1), _SEARCH_POOL_MAX)`
 - [x] **`ensure_node.py` / `ingest.py`** — Consolidate `_ENTITY_DOC_ID_RE` and `_GENERATED_ID_RE` into a single shared regex in `lethe/graph/ids.py`; the narrower pattern misses `rel_<sha1>` IDs
 
@@ -40,8 +40,8 @@
 - [x] **`test_gemini.py` / `test_gemini_llm.py`** — Merge into a single `test_gemini.py`
 - [x] **`test_models.py`** — Rename to `test_protocols.py` (it tests mock protocol conformance, not Pydantic models)
 - [x] **`contradiction.py`** — Add tests for `tombstone_relationship` (exists and not-exists paths)
-- [ ] **`consolidate.py` / `routers/admin.py`** — Add tests for `run_consolidation` and `POST /v1/admin/consolidate`
-- [ ] **`routers/admin.py`** — Add test for `POST /v1/admin/backfill` covering docs with and without embeddings
+- [x] **`consolidate.py` / `routers/admin.py`** — Add tests for `run_consolidation` and `POST /v1/admin/consolidate`
+- [x] **`routers/admin.py`** — Add test for `POST /v1/admin/backfill` covering docs with and without embeddings
 - [x] **`test_routers.py`** — Fix test setup to match production path: `get_canonical_map` calls `load_canonical_map(db)` live; test sets `app.state.canonical_map` which production never sets
 
 ## Configuration / Dependencies
