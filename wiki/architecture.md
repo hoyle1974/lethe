@@ -42,14 +42,14 @@
 7. Configure logging
 
 ## Routers
-| Module | Prefix | Responsibilities |
-|--------|--------|-----------------|
-| `lethe/routers/ingest.py` | `/v1` | POST /ingest |
-| `lethe/routers/search.py` | `/v1` | POST /search |
-| `lethe/routers/graph.py` | `/v1/graph` | POST /expand, POST /summarize |
-| `lethe/routers/admin.py` | `/v1/admin` | POST /consolidate, POST /backfill |
-| `lethe/routers/nodes.py` | `/v1` | GET /node-types |
-| `lethe/routers/entries.py` | `/v1` | GET /health |
+| Module | Responsibilities |
+|--------|-----------------|
+| `lethe/routers/admin.py` | GET /v1/health, GET /v1/node-types, POST /v1/admin/consolidate, POST /v1/admin/backfill |
+| `lethe/routers/ingest.py` | POST /v1/ingest |
+| `lethe/routers/search.py` | POST /v1/search |
+| `lethe/routers/graph.py` | POST /v1/graph/expand, POST /v1/graph/summarize |
+| `lethe/routers/nodes.py` | GET /v1/nodes/{uuid}, GET /v1/nodes |
+| `lethe/routers/entries.py` | GET /v1/entries/{uuid}, GET /v1/entries |
 
 ## Data Flow (Ingest)
 ```
