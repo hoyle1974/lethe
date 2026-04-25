@@ -150,27 +150,43 @@ When a new edge has the same `(subject_uuid, predicate, object_type)` as an exis
 
 Entry point: `POST /v1/ingest/corpus`.
 
+### Hub-and-Spoke Model
+
+Chunks are stored as vector-indexed `node_type="chunk"` nodes only — no SPO triple extraction per chunk. Triple extraction runs exactly once per document on a generated LLM summary. Code files additionally receive a deterministic structural edges pass with no LLM involvement.
+
 Steps for each document in the request:
 
 1. **Create document node** — embed first 10 000 chars, write to Firestore with `node_type="document"`, `weight=1.0`, `source=corpus_id`, `metadata={"filename": ..., "corpus_id": ...}`. Full original text stored in `content` field.
-2. **Chunk the document** — `chunk_document(text, filename, chunk_size)` in `lethe/graph/chunk.py` dispatches to:
+2. **Summarize document** — `summarize_document(llm, text, filename)` → Gemini generates 3–5 entity-dense sentences capped at `DOCUMENT_SUMMARY_CHAR_LIMIT = 50 000` chars. Uses `lethe/prompts/document_summary.txt`. Max tokens: `LLM_MAX_TOKENS_DOCUMENT_SUMMARY = 512`.
+3. **SPO extraction on summary** — call `run_ingest(summary)` once per document. Creates one `node_type="log"` summary node + entity/relationship nodes from triples. Tagged `metadata={"is_summary": True, "document_id": ..., "filename": ...}`.
+4. **Chunk document** — `chunk_document(text, filename, chunk_size)` in `lethe/graph/chunk.py` dispatches to:
    - **Code** (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.go`, `.rs`, `.c`, `.cpp`, `.h`, `.cs`, `.rb`, `.swift`, `.kt`): splits on top-level `def`/`class`/`async def` lines; prepends file preamble (imports) to each chunk; falls back to prose if no top-level defs found. Oversized blocks (>chunk_size×2 words) are split as prose with preamble re-injected into every sub-chunk.
    - **Prose** (all other extensions): splits on `\n\n`, accumulates up to `chunk_size` words, carries 1 trailing paragraph as overlap into the next chunk.
-3. **Ingest each chunk** — calls `run_ingest()` with `source=corpus_id` and `metadata={"document_id": ..., "chunk_index": ..., "filename": ...}`; the full triple extraction pipeline runs per chunk.
-4. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all chunks and documents. A node that appears in `nodes_created` is removed from `nodes_updated` if it was added there by an earlier chunk.
+5. **Store chunk nodes** — each chunk written directly as `node_type="chunk"`, `weight=0.4`, vector-indexed. No LLM extraction. `metadata={"document_id": ..., "chunk_index": N, "corpus_id": ..., "filename": ...}`.
+6. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
+   - `.py` files: stdlib `ast` parser extracts `(module, imports, dep)`, `(module, defines, fn)`, `(ClassName, has_method, fn)` triples.
+   - Other code types: regex-based import extraction.
+   - Entity node types: `module` for subjects/import targets, `function` for defines/has_method targets.
+   - `llm=None` passed to `ensure_node` and `create_relationship_node` (no collision detection, no supersede check).
+7. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all documents.
 
 ### Traceability chain
 
 ```
 document node  (node_type="document", content=full text, source=corpus_id)
-  └── chunk log nodes  (node_type="log", source=corpus_id, metadata.document_id=doc_id)
+  └── summary log node  (node_type="log", metadata={"is_summary": True, "document_id": ...})
         └── entity/relationship nodes  (source=corpus_id)
+chunk nodes  (node_type="chunk", metadata={"document_id": ..., "chunk_index": N}, source=corpus_id)
+structural entity nodes  (node_type="module"|"function", source=corpus_id)  [code files only]
+structural edges  (predicate="imports"|"defines"|"has_method")  [code files only]
 ```
 
-### Triple cap
+### Constants
 
-The extraction prompt cap was raised from 15 → 50 triples per call. `LLM_MAX_TOKENS_EXTRACTION = 32768` is the hard output ceiling.
-
-### Default chunk size
-
-`DEFAULT_CHUNK_SIZE = 600` words. Configurable per request via `chunk_size` field.
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `NODE_TYPE_CHUNK` | `"chunk"` | Node type for raw chunk nodes |
+| `CHUNK_NODE_WEIGHT` | `0.4` | Default weight for chunk nodes |
+| `LLM_MAX_TOKENS_DOCUMENT_SUMMARY` | `512` | Max tokens for document summary |
+| `DOCUMENT_SUMMARY_CHAR_LIMIT` | `50 000` | Max chars sent to summarizer |
+| `DEFAULT_CHUNK_SIZE` | `600` | Words per chunk (configurable per request) |

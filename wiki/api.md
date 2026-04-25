@@ -53,11 +53,13 @@ Always returns 200. Extraction errors are logged and skipped, not surfaced.
 ---
 
 ## POST /v1/ingest/corpus
-Ingest a collection of related documents (e.g. a codebase) as a single corpus.
-Stores each document as a raw `document` node preserving full original text, then
-chunks and ingests each chunk through the standard triple extraction pipeline.
-All nodes and edges are tagged `source=corpus_id`. Re-submitting with the same
-`corpus_id` appends to the existing corpus.
+Ingest a collection of related documents (e.g. a codebase) as a single corpus
+using the hub-and-spoke model. Each document gets one LLM summary → SPO extraction
+pass (not per chunk). Raw chunks are stored as vector-indexed `chunk` nodes (no triple
+extraction). Code files (`.py`, `.js`, `.ts`, etc.) additionally get deterministic
+structural edges (imports/defines/has_method) via stdlib `ast` — no LLM for code
+structure. All nodes and edges are tagged `source=corpus_id`. Re-submitting with the
+same `corpus_id` appends to the existing corpus.
 
 **Request** (`CorpusIngestRequest`):
 | Field | Type | Required | Default | Notes |
@@ -75,12 +77,15 @@ All nodes and edges are tagged `source=corpus_id`. Re-submitting with the same
 {
   "corpus_id": "uuid-or-caller-provided",
   "document_ids": ["doc-uuid-1", "doc-uuid-2"],
+  "chunk_ids": ["chunk-uuid-1", "chunk-uuid-2", "..."],
   "total_chunks": 42,
   "nodes_created": ["entity_abc", "..."],
   "nodes_updated": [],
   "relationships_created": ["rel_xyz", "..."]
 }
 ```
+
+`chunk_ids` — UUIDs of `node_type="chunk"` nodes. Use for targeted vector search against raw source text.
 
 ---
 
