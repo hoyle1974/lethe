@@ -8,6 +8,8 @@ from jinja2 import BaseLoader, Environment, Template
 
 from lethe.constants import (
     DEFAULT_NODE_TYPE,
+    DOCUMENT_SUMMARY_CHAR_LIMIT,
+    LLM_MAX_TOKENS_DOCUMENT_SUMMARY,
     LLM_MAX_TOKENS_EXTRACTION,
 )
 from lethe.graph.ensure_node import normalized_predicate
@@ -17,6 +19,17 @@ log = logging.getLogger(__name__)
 
 _PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
 _REFINERY_TEMPLATE = None
+_DOCUMENT_SUMMARY_TEMPLATE = None
+
+
+def _get_document_summary_template() -> Template:
+    global _DOCUMENT_SUMMARY_TEMPLATE
+    if _DOCUMENT_SUMMARY_TEMPLATE is None:
+        path = os.path.join(_PROMPT_DIR, "document_summary.txt")
+        with open(path) as f:
+            source = f.read()
+        _DOCUMENT_SUMMARY_TEMPLATE = Environment(loader=BaseLoader()).from_string(source)
+    return _DOCUMENT_SUMMARY_TEMPLATE
 
 
 def _get_refinery_template() -> Template:
@@ -101,7 +114,30 @@ def build_refinery_prompt(
     )
 
 
+_SUMMARY_SYSTEM = (
+    "You are a knowledge-graph preparation assistant. Output a dense prose summary only."
+)
+
 REFINERY_SYSTEM = "You are a knowledge graph extraction engine. Follow the output format exactly."
+
+
+async def summarize_document(
+    llm: LLMDispatcher,
+    text: str,
+    filename: str = "",
+) -> str:
+    """Summarize a document into 3-5 entity-dense sentences for SPO extraction."""
+    tmpl = _get_document_summary_template()
+    prompt = tmpl.render(text=text[:DOCUMENT_SUMMARY_CHAR_LIMIT], filename=filename)
+    log.info("summarize_document: sending %d chars to LLM filename=%r", len(text), filename)
+    raw = await llm.dispatch(
+        LLMRequest(
+            system_prompt=_SUMMARY_SYSTEM,
+            user_prompt=prompt,
+            max_tokens=LLM_MAX_TOKENS_DOCUMENT_SUMMARY,
+        )
+    )
+    return raw.strip()
 
 
 async def extract_triples(

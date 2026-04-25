@@ -91,3 +91,38 @@ def test_build_refinery_prompt_omits_owner_rule_when_empty():
         owner_name="",
     )
     assert "owner_name" not in prompt.lower()
+
+
+async def test_summarize_document_returns_llm_text():
+    from unittest.mock import AsyncMock
+
+    from lethe.graph.extraction import summarize_document
+
+    mock_llm = AsyncMock()
+    mock_llm.dispatch.return_value = "Alice works at Acme Corp and manages Bob."
+
+    result = await summarize_document(
+        mock_llm, text="Alice works at Acme. She manages Bob.", filename="notes.txt"
+    )
+
+    assert result == "Alice works at Acme Corp and manages Bob."
+    assert mock_llm.dispatch.call_count == 1
+
+
+async def test_summarize_document_truncates_at_char_limit():
+    from lethe.constants import DOCUMENT_SUMMARY_CHAR_LIMIT
+    from lethe.graph.extraction import summarize_document
+
+    captured: list = []
+
+    class CapturingLLM:
+        async def dispatch(self, req):
+            captured.append(req)
+            return "summary"
+
+    long_text = "x" * (DOCUMENT_SUMMARY_CHAR_LIMIT + 10_000)
+    await summarize_document(CapturingLLM(), text=long_text, filename="big.txt")
+
+    assert len(captured) == 1
+    # Template preamble adds ~500 chars; allow 1 500 chars total overhead
+    assert len(captured[0].user_prompt) < DOCUMENT_SUMMARY_CHAR_LIMIT + 1_500
