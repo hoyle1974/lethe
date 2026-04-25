@@ -111,6 +111,7 @@ async def expand(
         limit_per_edge=req.limit_per_edge,
         self_seed_neighbor_floor=req.self_seed_neighbor_floor,
         user_id=req.user_id,
+        source_filter=req.source_filter,
     )
 
 
@@ -153,6 +154,7 @@ async def summarize(
         limit_per_edge=req.limit_per_edge,
         self_seed_neighbor_floor=req.self_seed_neighbor_floor,
         user_id=req.user_id,
+        source_filter=req.source_filter,
     )
     log.info(
         "summarize:pass1_graph nodes=%d edges=%d",
@@ -275,6 +277,7 @@ async def summarize(
             limit_per_edge=req.limit_per_edge,
             self_seed_neighbor_floor=req.self_seed_neighbor_floor,
             user_id=req.user_id,
+            source_filter=req.source_filter,
         )
         combined = _merge_graphs(combined, extra)
         log.info(

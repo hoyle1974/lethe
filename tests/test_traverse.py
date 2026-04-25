@@ -221,3 +221,148 @@ def test_graph_expand_request_source_filter_defaults_none():
 
     req = GraphExpandRequest(seed_ids=["abc"])
     assert req.source_filter is None
+
+
+@pytest.mark.asyncio
+async def test_graph_expand_excludes_non_matching_source_nodes(mock_embedder):
+    """graph_expand with source_filter excludes nodes from non-matching corpora."""
+    from unittest.mock import MagicMock
+
+    from lethe.graph.traverse import graph_expand
+
+    cfg = _config()
+
+    snap_map = {
+        "seed-entity-1": {
+            "node_type": "person",
+            "content": "Alice",
+            "domain": "general",
+            "weight": 0.55,
+            "metadata": "{}",
+            "journal_entry_ids": [],
+            "user_id": "global",
+            "source": None,
+        },
+        "chunk-corpus-a": {
+            "node_type": "chunk",
+            "content": "Alice's notes from corpus A",
+            "domain": "general",
+            "weight": 0.4,
+            "metadata": "{}",
+            "journal_entry_ids": [],
+            "user_id": "global",
+            "source": "corpus-A",
+        },
+        "chunk-corpus-b": {
+            "node_type": "chunk",
+            "content": "Alice's notes from corpus B",
+            "domain": "general",
+            "weight": 0.4,
+            "metadata": "{}",
+            "journal_entry_ids": [],
+            "user_id": "global",
+            "source": "corpus-B",
+        },
+    }
+
+    async def fake_get_all(refs):
+        for ref in refs:
+            data = snap_map.get(ref.id)
+            if data:
+                snap = MagicMock()
+                snap.exists = True
+                snap.id = ref.id
+                snap.to_dict.return_value = data
+                yield snap
+
+    edge_snap_a = MagicMock()
+    edge_snap_a.id = "rel-a"
+    edge_snap_a.to_dict.return_value = {
+        "subject_uuid": "seed-entity-1",
+        "predicate": "references",
+        "object_uuid": "chunk-corpus-a",
+        "content": "",
+        "weight": 0.8,
+        "domain": "general",
+        "user_id": "global",
+        "journal_entry_ids": [],
+    }
+    edge_snap_b = MagicMock()
+    edge_snap_b.id = "rel-b"
+    edge_snap_b.to_dict.return_value = {
+        "subject_uuid": "seed-entity-1",
+        "predicate": "references",
+        "object_uuid": "chunk-corpus-b",
+        "content": "",
+        "weight": 0.8,
+        "domain": "general",
+        "user_id": "global",
+        "journal_entry_ids": [],
+    }
+
+    # subject_uuid query yields both edges; object_uuid query yields nothing
+    async def fake_stream_subject():
+        yield edge_snap_a
+        yield edge_snap_b
+
+    async def fake_stream_object():
+        return
+        yield
+
+    query_calls = 0
+
+    def build_query(col):
+        q = MagicMock()
+
+        def _where(filter=None):
+            nonlocal query_calls
+            inner = MagicMock()
+            inner.where.side_effect = _where
+            inner.limit.return_value = inner
+
+            # subject_uuid queries return edges; object_uuid queries return nothing
+            field = getattr(filter, "field_path", None) or getattr(filter, "_field", None)
+            if field == "subject_uuid":
+                inner.stream = fake_stream_subject
+            else:
+                inner.stream = fake_stream_object
+            return inner
+
+        q.where.side_effect = _where
+        q.limit.return_value = q
+        return q
+
+    def _make_doc_ref(uid):
+        ref = MagicMock()
+        ref.id = uid
+        return ref
+
+    node_col = MagicMock()
+    node_col.document.side_effect = _make_doc_ref
+
+    rel_col = build_query(None)
+    rel_col.where.side_effect = lambda filter=None: build_query(None).where(filter=filter)
+
+    def _collection(name):
+        if "relationship" in name:
+            return rel_col
+        return node_col
+
+    mock_db = MagicMock()
+    mock_db.get_all = fake_get_all
+    mock_db.collection.side_effect = _collection
+
+    result = await graph_expand(
+        db=mock_db,
+        embedder=mock_embedder,
+        config=cfg,
+        seed_ids=["seed-entity-1"],
+        query=None,
+        hops=1,
+        limit_per_edge=20,
+        user_id="global",
+        source_filter="corpus-A",
+    )
+
+    assert "chunk-corpus-b" not in result.nodes, "corpus-B node should be excluded"
+    assert "seed-entity-1" in result.nodes, "seed node (source=None) should always pass"

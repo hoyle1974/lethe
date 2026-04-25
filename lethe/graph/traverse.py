@@ -165,6 +165,7 @@ async def graph_expand(
     limit_per_edge: int,
     user_id: str,
     self_seed_neighbor_floor: int = 40,
+    source_filter: Optional[str] = None,
 ) -> GraphExpandResponse:
     log.info(
         "graph_expand:start seeds=%d hops=%d limit_per_edge=%d user_id=%s has_query=%s",
@@ -191,7 +192,11 @@ async def graph_expand(
         if node.node_type != NODE_TYPE_LOG and _is_alive(node):
             all_nodes[node.uuid] = node
 
-    frontier = [n for n in seed_nodes.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)]
+    frontier = [
+        n
+        for n in seed_nodes.values()
+        if n.node_type != NODE_TYPE_LOG and _is_alive(n) and _passes_source_filter(n, source_filter)
+    ]
     log.info(
         "graph_expand:seed_fetch requested=%d found=%d frontier=%d",
         len(seed_ids),
@@ -240,6 +245,8 @@ async def graph_expand(
                 all_nodes[n.uuid] = n
 
         non_log = [n for n in candidates.values() if n.node_type != NODE_TYPE_LOG and _is_alive(n)]
+        if source_filter:
+            non_log = [n for n in non_log if _passes_source_filter(n, source_filter)]
         self_neighbors = [n for n in non_log if n.uuid in self_neighbor_ids]
 
         pruned = prune_frontier_by_similarity(non_log, query_vector, limit_per_edge)
