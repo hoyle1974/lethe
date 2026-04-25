@@ -52,6 +52,38 @@ Always returns 200. Extraction errors are logged and skipped, not surfaced.
 
 ---
 
+## POST /v1/ingest/corpus
+Ingest a collection of related documents (e.g. a codebase) as a single corpus.
+Stores each document as a raw `document` node preserving full original text, then
+chunks and ingests each chunk through the standard triple extraction pipeline.
+All nodes and edges are tagged `source=corpus_id`. Re-submitting with the same
+`corpus_id` appends to the existing corpus.
+
+**Request** (`CorpusIngestRequest`):
+| Field | Type | Required | Default | Notes |
+|-------|------|----------|---------|-------|
+| `corpus_id` | string | no | generated UUID | Re-use to append to existing corpus |
+| `documents` | list[DocumentItem] | yes (min 1) | — | Each item: `{ "text": "...", "filename": "..." }` |
+| `user_id` | string | no | `"global"` | User scope |
+| `domain` | string | no | `"general"` | Namespace |
+| `chunk_size` | int | no | `600` | Approximate words per chunk |
+
+`filename` controls chunking strategy: `.py`/`.js`/`.ts`/etc → code (function/class splits); everything else → prose (paragraph splits).
+
+**Response** (`CorpusIngestResponse`):
+```json
+{
+  "corpus_id": "uuid-or-caller-provided",
+  "document_ids": ["doc-uuid-1", "doc-uuid-2"],
+  "total_chunks": 42,
+  "nodes_created": ["entity_abc", "..."],
+  "nodes_updated": [],
+  "relationships_created": ["rel_xyz", "..."]
+}
+```
+
+---
+
 ## POST /v1/search
 Hybrid vector search. Embeds query, searches nodes + edges, applies temporal decay ranking.
 

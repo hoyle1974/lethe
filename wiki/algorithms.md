@@ -143,3 +143,34 @@ When a new edge has the same `(subject_uuid, predicate, object_type)` as an exis
 - `max_tokens`: `LLM_MAX_TOKENS_RELATIONSHIP_SUPERSEDES = 64`
 - If superseded: set old edge `weight = 0.0` (tombstone)
 - Candidate limit: `RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT = 10`
+
+---
+
+## 9. Corpus Ingestion (`lethe/graph/corpus.py::run_corpus_ingest`)
+
+Entry point: `POST /v1/ingest/corpus`.
+
+Steps for each document in the request:
+
+1. **Create document node** — embed first 10 000 chars, write to Firestore with `node_type="document"`, `weight=1.0`, `source=corpus_id`, `metadata={"filename": ..., "corpus_id": ...}`. Full original text stored in `content` field.
+2. **Chunk the document** — `chunk_document(text, filename, chunk_size)` in `lethe/graph/chunk.py` dispatches to:
+   - **Code** (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.go`, `.rs`, `.c`, `.cpp`, `.h`, `.cs`, `.rb`, `.swift`, `.kt`): splits on top-level `def`/`class`/`async def` lines; prepends file preamble (imports) to each chunk; falls back to prose if no top-level defs found. Oversized blocks (>chunk_size×2 words) are split as prose with preamble re-injected into every sub-chunk.
+   - **Prose** (all other extensions): splits on `\n\n`, accumulates up to `chunk_size` words, carries 1 trailing paragraph as overlap into the next chunk.
+3. **Ingest each chunk** — calls `run_ingest()` with `source=corpus_id` and `metadata={"document_id": ..., "chunk_index": ..., "filename": ...}`; the full triple extraction pipeline runs per chunk.
+4. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all chunks and documents. A node that appears in `nodes_created` is removed from `nodes_updated` if it was added there by an earlier chunk.
+
+### Traceability chain
+
+```
+document node  (node_type="document", content=full text, source=corpus_id)
+  └── chunk log nodes  (node_type="log", source=corpus_id, metadata.document_id=doc_id)
+        └── entity/relationship nodes  (source=corpus_id)
+```
+
+### Triple cap
+
+The extraction prompt cap was raised from 15 → 50 triples per call. `LLM_MAX_TOKENS_EXTRACTION = 32768` is the hard output ceiling.
+
+### Default chunk size
+
+`DEFAULT_CHUNK_SIZE = 600` words. Configurable per request via `chunk_size` field.
