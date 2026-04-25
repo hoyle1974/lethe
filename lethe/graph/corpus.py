@@ -19,13 +19,14 @@ from lethe.constants import (
     NODE_TYPE_DOCUMENT,
 )
 from lethe.graph.canonical_map import CanonicalMap
-from lethe.graph.chunk import chunk_document
+from lethe.graph.chunk import chunk_document, detect_chunk_strategy
 from lethe.graph.code_graph import extract_structural_triples
 from lethe.graph.ensure_node import (
     create_relationship_node,
     ensure_node,
     stable_entity_doc_id,
 )
+from lethe.graph.extraction import summarize_document
 from lethe.graph.ingest import run_ingest
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector
@@ -264,6 +265,7 @@ async def run_corpus_ingest(
     ts = datetime.now(timezone.utc).isoformat()
 
     document_ids: list[str] = []
+    chunk_ids: list[str] = []
     all_nodes_created: list[str] = []
     all_nodes_updated: list[str] = []
     all_relationships_created: list[str] = []
@@ -274,12 +276,8 @@ async def run_corpus_ingest(
 
     total_docs = len(documents)
     for doc_idx, doc in enumerate(documents):
-        log.info(
-            "corpus: [%d/%d] starting %r",
-            doc_idx + 1,
-            total_docs,
-            doc.filename,
-        )
+        log.info("corpus: [%d/%d] starting %r", doc_idx + 1, total_docs, doc.filename)
+
         doc_id = await _create_document_node(
             db=db,
             embedder=embedder,
@@ -293,6 +291,44 @@ async def run_corpus_ingest(
         )
         document_ids.append(doc_id)
 
+        # One LLM summary per document → SPO extraction on summary only
+        summary = await summarize_document(llm=llm, text=doc.text, filename=doc.filename)
+        log.info(
+            "corpus: [%d/%d] summary=%d chars filename=%r",
+            doc_idx + 1,
+            total_docs,
+            len(summary),
+            doc.filename,
+        )
+        if summary:
+            summary_result = await run_ingest(
+                db=db,
+                embedder=embedder,
+                llm=llm,
+                config=config,
+                canonical_map=canonical_map,
+                text=summary,
+                domain=domain,
+                source=corpus_id,
+                user_id=user_id,
+                timestamp=ts,
+                metadata={
+                    "document_id": doc_id,
+                    "filename": doc.filename,
+                    "is_summary": True,
+                },
+            )
+            _merge_ingest_result(
+                summary_result,
+                seen_created,
+                seen_updated,
+                seen_relationships,
+                all_nodes_created,
+                all_nodes_updated,
+                all_relationships_created,
+            )
+
+        # Chunks stored as vector-indexed nodes — no SPO extraction
         chunks = chunk_document(doc.text, doc.filename, chunk_size)
         log.info(
             "corpus: [%d/%d] %r → %d chunks (doc_id=%s)",
@@ -302,43 +338,43 @@ async def run_corpus_ingest(
             len(chunks),
             doc_id,
         )
-
         for i, chunk_text in enumerate(chunks):
-            log.info(
-                "corpus: [%d/%d] %r chunk %d/%d",
-                doc_idx + 1,
-                total_docs,
-                doc.filename,
-                i + 1,
-                len(chunks),
-            )
-            result = await run_ingest(
+            chunk_id = await _create_chunk_node(
                 db=db,
                 embedder=embedder,
-                llm=llm,
                 config=config,
-                canonical_map=canonical_map,
                 text=chunk_text,
-                domain=domain,
-                source=corpus_id,
+                document_id=doc_id,
+                corpus_id=corpus_id,
+                filename=doc.filename,
+                chunk_index=i,
                 user_id=user_id,
-                timestamp=ts,
-                metadata={"document_id": doc_id, "chunk_index": i, "filename": doc.filename},
+                domain=domain,
+                ts=ts,
             )
+            chunk_ids.append(chunk_id)
             total_chunks += 1
-            for n in result.nodes_created:
-                if n not in seen_created:
-                    seen_created.add(n)
-                    seen_updated.discard(n)
-                    all_nodes_created.append(n)
-            for n in result.nodes_updated:
-                if n not in seen_created and n not in seen_updated:
-                    seen_updated.add(n)
-                    all_nodes_updated.append(n)
-            for r in result.relationships_created:
-                if r not in seen_relationships:
-                    seen_relationships.add(r)
-                    all_relationships_created.append(r)
+
+        # Code files get deterministic structural edges (no LLM)
+        if detect_chunk_strategy(doc.filename) == "code":
+            await _ingest_structural_edges(
+                db=db,
+                embedder=embedder,
+                config=config,
+                text=doc.text,
+                filename=doc.filename,
+                document_id=doc_id,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                domain=domain,
+                ts=ts,
+                nodes_created=all_nodes_created,
+                nodes_updated=all_nodes_updated,
+                relationships_created=all_relationships_created,
+                seen_created=seen_created,
+                seen_updated=seen_updated,
+                seen_relationships=seen_relationships,
+            )
 
     log.info(
         "corpus: complete corpus_id=%s documents=%d chunks=%d nodes_created=%d",
@@ -350,6 +386,7 @@ async def run_corpus_ingest(
     return CorpusIngestResponse(
         corpus_id=corpus_id,
         document_ids=document_ids,
+        chunk_ids=chunk_ids,
         total_chunks=total_chunks,
         nodes_created=all_nodes_created,
         nodes_updated=all_nodes_updated,
