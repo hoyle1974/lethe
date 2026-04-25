@@ -52,6 +52,12 @@ def _is_alive(n: Node) -> bool:
     return n.weight > 0.0
 
 
+def _passes_source_filter(node: Node, source_filter: Optional[str]) -> bool:
+    if source_filter is None:
+        return True
+    return node.source is None or node.source == source_filter
+
+
 def prune_frontier_by_similarity(
     nodes: list[Node],
     query_vector: Optional[list[float]],

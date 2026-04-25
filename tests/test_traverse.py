@@ -177,3 +177,47 @@ async def test_get_edge_neighbors_queries_relationships_collection():
     assert len(edges) >= 1
     assert edges[0].predicate == "knows"
     assert edges[0].uuid == "rel_abc"
+
+
+def test_passes_source_filter_none_allows_all():
+    from lethe.graph.traverse import _passes_source_filter
+
+    node_with_source = Node(uuid="a", node_type="chunk", content="x", source="corpus-A")
+    node_no_source = Node(uuid="b", node_type="person", content="Alice")
+    assert _passes_source_filter(node_with_source, None) is True
+    assert _passes_source_filter(node_no_source, None) is True
+
+
+def test_passes_source_filter_entity_node_always_passes():
+    from lethe.graph.traverse import _passes_source_filter
+
+    entity = Node(uuid="e", node_type="person", content="Alice")  # source defaults to None
+    assert _passes_source_filter(entity, "corpus-A") is True
+
+
+def test_passes_source_filter_matching_source_passes():
+    from lethe.graph.traverse import _passes_source_filter
+
+    node = Node(uuid="c", node_type="chunk", content="x", source="corpus-A")
+    assert _passes_source_filter(node, "corpus-A") is True
+
+
+def test_passes_source_filter_non_matching_source_excluded():
+    from lethe.graph.traverse import _passes_source_filter
+
+    node = Node(uuid="d", node_type="chunk", content="x", source="corpus-B")
+    assert _passes_source_filter(node, "corpus-A") is False
+
+
+def test_graph_expand_request_accepts_source_filter():
+    from lethe.models.node import GraphExpandRequest
+
+    req = GraphExpandRequest(seed_ids=["abc"], source_filter="corpus-123")
+    assert req.source_filter == "corpus-123"
+
+
+def test_graph_expand_request_source_filter_defaults_none():
+    from lethe.models.node import GraphExpandRequest
+
+    req = GraphExpandRequest(seed_ids=["abc"])
+    assert req.source_filter is None

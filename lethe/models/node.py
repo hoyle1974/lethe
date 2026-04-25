@@ -87,6 +87,7 @@ class GraphExpandRequest(BaseModel):
     self_seed_neighbor_floor: int = 40
     debug: bool = False
     user_id: str = DEFAULT_USER_ID
+    source_filter: str | None = None
 
 
 class GraphExpandResponse(BaseModel):
