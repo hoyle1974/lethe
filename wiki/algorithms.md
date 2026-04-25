@@ -100,6 +100,33 @@ graph_expand(seed_ids, query, hops, limit_per_edge, user_id, self_seed_neighbor_
 
 ---
 
+## 6a. Source Log Enrichment (`lethe/graph/source_fetch.py`)
+
+Called in the summarize pipeline after BFS expansion, before the final LLM pass.
+
+```
+fetch_source_logs(entity_nodes, db, config, max_per_node=2, max_total=30)
+```
+
+1. For each entity node in the expanded graph, take the last `max_per_node` entries from `journal_entry_ids` (most recent first — IDs are appended in insertion order)
+2. Deduplicate across all entities; cap at `max_total` total log IDs
+3. Batch-fetch from Firestore nodes collection
+4. Return `entity_uuid → [log_node, ...]`
+
+Result is passed to `GraphExpandResponse.to_markdown()` as `source_logs`. The markdown renders each entity's source log content inline:
+
+```
+- **person** `abc12345` [SEED]: Jack Strohm (metadata={})
+  [source] "Started building Lethe last month, it's a graph-based memory system..."
+  [source] "Working on the summarization pipeline today..."
+```
+
+This gives the final summarization LLM both the structured fact (compressed, precise) and the original prose (expressive, contextual).
+
+Constants: `SOURCE_LOGS_MAX_PER_NODE = 2`, `SOURCE_LOGS_MAX_TOTAL = 30`, `SOURCE_LOG_SNIPPET_LENGTH = 250`
+
+---
+
 ## 7. Memory Consolidation (`lethe/graph/consolidate.py`)
 
 1. Fetch up to `CONSOLIDATION_LOG_QUERY_LIMIT = 50` recent log nodes for user
