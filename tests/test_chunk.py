@@ -125,3 +125,15 @@ def test_chunk_document_no_filename_uses_prose():
     text = "Short text.\n\nAnother paragraph."
     chunks = chunk_document(text, filename="", chunk_size=100)
     assert len(chunks) == 1
+
+
+def test_chunk_code_oversized_block_preamble_in_all_sub_chunks():
+    """Oversized function body splits into sub-chunks that all carry the preamble."""
+    preamble = "import os"
+    body_line = "x = os.path.join('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')\n"
+    body = body_line * 4  # ~36 words, triggers split at chunk_size=15 (threshold=30)
+    code = f"{preamble}\n\ndef foo():\n{body}"
+    chunks = chunk_code(code, chunk_size=15)
+    assert len(chunks) > 1, "oversized block should produce multiple sub-chunks"
+    for i, chunk in enumerate(chunks):
+        assert "import os" in chunk, f"chunk {i} is missing the preamble"
