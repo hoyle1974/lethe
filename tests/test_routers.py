@@ -606,3 +606,92 @@ def test_backfill_uses_embed_batch(mock_embedder, mock_llm):
     assert "embed_batch" in source, "backfill must use embed_batch"
     lines = [ln for ln in source.splitlines() if "embedder.embed(" in ln]
     assert lines == [], f"backfill must not call embedder.embed() directly; found: {lines}"
+
+
+def test_corpus_ingest_generates_corpus_id(mock_embedder, mock_llm):
+    """Corpus endpoint returns a corpus_id when none is provided."""
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "corpus_id" in data
+    assert isinstance(data["corpus_id"], str)
+    assert len(data["corpus_id"]) > 0
+
+
+def test_corpus_ingest_accepts_explicit_corpus_id(mock_embedder, mock_llm):
+    """Provided corpus_id is preserved in the response."""
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={
+            "corpus_id": "my-corpus-abc",
+            "documents": [{"text": "Bob runs engineering.", "filename": "notes.txt"}],
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["corpus_id"] == "my-corpus-abc"
+
+
+def test_corpus_ingest_returns_document_ids(mock_embedder, mock_llm):
+    """One document_id is returned per submitted document."""
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={
+            "documents": [
+                {"text": "Doc one content.", "filename": "a.txt"},
+                {"text": "Doc two content.", "filename": "b.txt"},
+            ]
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data["document_ids"]) == 2
+    assert data["total_chunks"] >= 2
+
+
+def test_corpus_ingest_rejects_empty_documents(mock_embedder, mock_llm):
+    """Empty documents list is rejected with 422."""
+    client = _make_test_client(mock_embedder, mock_llm)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={"documents": []},
+    )
+    assert resp.status_code == 422
