@@ -695,3 +695,91 @@ def test_corpus_ingest_rejects_empty_documents(mock_embedder, mock_llm):
         json={"documents": []},
     )
     assert resp.status_code == 422
+
+
+def test_corpus_ingest_response_contains_chunk_ids(mock_embedder, mock_llm):
+    """Response includes a chunk_ids list with one entry per chunk created."""
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "chunk_ids" in data
+    assert isinstance(data["chunk_ids"], list)
+    assert len(data["chunk_ids"]) >= 1
+
+
+def test_corpus_ingest_chunk_nodes_use_chunk_type(mock_embedder, mock_llm):
+    """Each chunk is stored as node_type='chunk', not 'log'."""
+    written_node_types: list[str] = []
+
+    async def capturing_set(data, **kwargs):
+        if isinstance(data, dict) and "node_type" in data:
+            written_node_types.append(data["node_type"])
+
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = capturing_set
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
+    )
+    assert resp.status_code == 201
+    assert "chunk" in written_node_types
+
+
+def test_corpus_ingest_llm_called_twice_per_doc_not_per_chunk(mock_embedder):
+    """Hub-and-spoke: LLM called exactly twice per document (summary + extraction),
+    regardless of how many chunks the document produces."""
+    multi_para = "\n\n".join([f"paragraph {i} words." for i in range(5)])
+
+    dispatch_calls: list = []
+
+    class TrackingLLM:
+        async def dispatch(self, req):
+            dispatch_calls.append(req)
+            return "status: none"
+
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+
+    client = _make_test_client(mock_embedder, TrackingLLM(), mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={
+            "documents": [{"text": multi_para, "filename": "notes.txt"}],
+            "chunk_size": 2,
+        },
+    )
+    assert resp.status_code == 201
+    # Exactly 2 LLM calls per document: 1 for summarize_document + 1 for extract_triples(summary)
+    assert len(dispatch_calls) == 2
