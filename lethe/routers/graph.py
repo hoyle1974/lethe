@@ -15,6 +15,7 @@ from lethe.constants import (
 )
 from lethe.deps import get_config, get_db, get_embedder, get_llm
 from lethe.graph.search import execute_search
+from lethe.graph.source_fetch import fetch_source_logs
 from lethe.graph.traverse import graph_expand
 from lethe.infra.embedder import Embedder
 from lethe.infra.llm import LLMDispatcher, LLMRequest
@@ -284,7 +285,16 @@ async def summarize(
     else:
         log.info("summarize:pass2_skipped no_retrieval_seed_ids")
 
-    final_md = combined.to_markdown(req.seed_ids)
+    source_logs = await fetch_source_logs(
+        entity_nodes=combined.nodes,
+        db=db,
+        config=config,
+    )
+    log.info(
+        "summarize:source_logs entities_with_logs=%d",
+        len(source_logs),
+    )
+    final_md = combined.to_markdown(req.seed_ids, source_logs=source_logs)
     if question_query_mode:
         final_prompt = (
             "Improve this draft using the enriched graph. Return sections:\n"
