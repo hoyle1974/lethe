@@ -20,11 +20,17 @@ from lethe.constants import (
 )
 from lethe.graph.canonical_map import CanonicalMap
 from lethe.graph.chunk import chunk_document
+from lethe.graph.code_graph import extract_structural_triples
+from lethe.graph.ensure_node import (
+    create_relationship_node,
+    ensure_node,
+    stable_entity_doc_id,
+)
 from lethe.graph.ingest import run_ingest
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector
 from lethe.infra.llm import LLMDispatcher
-from lethe.models.node import CorpusIngestResponse, DocumentItem
+from lethe.models.node import CorpusIngestResponse, DocumentItem, IngestResponse
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +119,133 @@ async def _create_chunk_node(
         chunk_index,
     )
     return chunk_id
+
+
+async def _node_exists_by_type(
+    db: firestore.AsyncClient,
+    config: Config,
+    node_type: str,
+    name: str,
+) -> bool:
+    doc_id = stable_entity_doc_id(node_type, name)
+    snap = await db.collection(config.lethe_collection).document(doc_id).get()
+    return snap.exists
+
+
+def _merge_ingest_result(
+    result: IngestResponse,
+    seen_created: set[str],
+    seen_updated: set[str],
+    seen_relationships: set[str],
+    all_nodes_created: list[str],
+    all_nodes_updated: list[str],
+    all_relationships_created: list[str],
+) -> None:
+    for n in result.nodes_created:
+        if n not in seen_created:
+            seen_created.add(n)
+            seen_updated.discard(n)
+            all_nodes_created.append(n)
+    for n in result.nodes_updated:
+        if n not in seen_created and n not in seen_updated:
+            seen_updated.add(n)
+            all_nodes_updated.append(n)
+    for r in result.relationships_created:
+        if r not in seen_relationships:
+            seen_relationships.add(r)
+            all_relationships_created.append(r)
+
+
+_STRUCTURAL_PREDICATE_OBJECT_TYPE: dict[str, str] = {
+    "imports": "module",
+    "defines": "function",
+    "has_method": "function",
+}
+
+
+async def _ingest_structural_edges(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    config: Config,
+    text: str,
+    filename: str,
+    document_id: str,
+    corpus_id: str,
+    user_id: str,
+    domain: str,
+    ts: str,
+    nodes_created: list[str],
+    nodes_updated: list[str],
+    relationships_created: list[str],
+    seen_created: set[str],
+    seen_updated: set[str],
+    seen_relationships: set[str],
+) -> None:
+    """Write deterministic code-structure edges to the graph without LLM calls."""
+    triples = extract_structural_triples(text, filename)
+    if not triples:
+        return
+
+    log.info("corpus: structural edges filename=%r triples=%d", filename, len(triples))
+    for subj, pred, obj in triples:
+        subj_type = "module"
+        obj_type = _STRUCTURAL_PREDICATE_OBJECT_TYPE.get(pred, "generic")
+
+        subj_existed = await _node_exists_by_type(db, config, subj_type, subj)
+        subj_node = await ensure_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            identifier=subj,
+            node_type=subj_type,
+            source_entry_id=document_id,
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+
+        obj_existed = await _node_exists_by_type(db, config, obj_type, obj)
+        obj_node = await ensure_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            identifier=obj,
+            node_type=obj_type,
+            source_entry_id=document_id,
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+
+        for node_uuid, existed in [
+            (subj_node.uuid, subj_existed),
+            (obj_node.uuid, obj_existed),
+        ]:
+            if not existed and node_uuid not in seen_created:
+                seen_created.add(node_uuid)
+                seen_updated.discard(node_uuid)
+                nodes_created.append(node_uuid)
+            elif existed and node_uuid not in seen_created and node_uuid not in seen_updated:
+                seen_updated.add(node_uuid)
+                nodes_updated.append(node_uuid)
+
+        rel_id = await create_relationship_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            subject_id=subj_node.uuid,
+            predicate=pred,
+            object_id=obj_node.uuid,
+            source_entry_id=document_id,
+            subject_content=subj_node.content,
+            object_content=obj_node.content,
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+        if rel_id not in seen_relationships:
+            seen_relationships.add(rel_id)
+            relationships_created.append(rel_id)
 
 
 async def run_corpus_ingest(
