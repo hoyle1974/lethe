@@ -9,11 +9,13 @@ from google.cloud import firestore
 
 from lethe.config import Config
 from lethe.constants import (
+    CHUNK_NODE_WEIGHT,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_DOMAIN,
     DEFAULT_USER_ID,
     DOCUMENT_NODE_WEIGHT,
     EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
+    NODE_TYPE_CHUNK,
     NODE_TYPE_DOCUMENT,
 )
 from lethe.graph.canonical_map import CanonicalMap
@@ -61,6 +63,56 @@ async def _create_document_node(
     )
     log.info("corpus: created document node doc_id=%s filename=%r", doc_id, filename)
     return doc_id
+
+
+async def _create_chunk_node(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    config: Config,
+    text: str,
+    document_id: str,
+    corpus_id: str,
+    filename: str,
+    chunk_index: int,
+    user_id: str,
+    domain: str,
+    ts: str,
+) -> str:
+    chunk_id = str(uuid.uuid4())
+    vector = await embedder.embed(text[:10_000], EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
+    metadata = json.dumps(
+        {
+            "document_id": document_id,
+            "corpus_id": corpus_id,
+            "filename": filename,
+            "chunk_index": chunk_index,
+        }
+    )
+    await (
+        db.collection(config.lethe_collection)
+        .document(chunk_id)
+        .set(
+            {
+                "node_type": NODE_TYPE_CHUNK,
+                "content": text,
+                "domain": domain,
+                "weight": CHUNK_NODE_WEIGHT,
+                "metadata": metadata,
+                "embedding": Vector(vector),
+                "user_id": user_id,
+                "source": corpus_id,
+                "created_at": ts,
+                "updated_at": ts,
+            }
+        )
+    )
+    log.info(
+        "corpus: created chunk node chunk_id=%s filename=%r chunk_index=%d",
+        chunk_id,
+        filename,
+        chunk_index,
+    )
+    return chunk_id
 
 
 async def run_corpus_ingest(
