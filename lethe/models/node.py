@@ -134,7 +134,7 @@ class GraphSummarizeResponse(BaseModel):
 
 
 class DocumentItem(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1)
     filename: str
 
 
