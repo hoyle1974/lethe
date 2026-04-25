@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
 
 from lethe.constants import (
+    DEFAULT_CHUNK_SIZE,
     DEFAULT_DOMAIN,
     DEFAULT_RELATIONSHIP_WEIGHT,
     DEFAULT_USER_ID,
@@ -130,3 +131,25 @@ class GraphExpandResponse(BaseModel):
 class GraphSummarizeResponse(BaseModel):
     summary: str
     debug_reasoning: dict | None = None
+
+
+class DocumentItem(BaseModel):
+    text: str
+    filename: str
+
+
+class CorpusIngestRequest(BaseModel):
+    corpus_id: str | None = None
+    documents: list[DocumentItem]
+    user_id: str = DEFAULT_USER_ID
+    domain: str = DEFAULT_DOMAIN
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+
+
+class CorpusIngestResponse(BaseModel):
+    corpus_id: str
+    document_ids: list[str] = Field(default_factory=list)
+    total_chunks: int = 0
+    nodes_created: list[str] = Field(default_factory=list)
+    nodes_updated: list[str] = Field(default_factory=list)
+    relationships_created: list[str] = Field(default_factory=list)
