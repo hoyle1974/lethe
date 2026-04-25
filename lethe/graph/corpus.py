@@ -82,6 +82,9 @@ async def run_corpus_ingest(
     all_nodes_created: list[str] = []
     all_nodes_updated: list[str] = []
     all_relationships_created: list[str] = []
+    seen_created: set[str] = set()
+    seen_updated: set[str] = set()
+    seen_relationships: set[str] = set()
     total_chunks = 0
 
     for doc in documents:
@@ -122,13 +125,17 @@ async def run_corpus_ingest(
             )
             total_chunks += 1
             for n in result.nodes_created:
-                if n not in all_nodes_created:
+                if n not in seen_created:
+                    seen_created.add(n)
+                    seen_updated.discard(n)
                     all_nodes_created.append(n)
             for n in result.nodes_updated:
-                if n not in all_nodes_updated and n not in all_nodes_created:
+                if n not in seen_created and n not in seen_updated:
+                    seen_updated.add(n)
                     all_nodes_updated.append(n)
             for r in result.relationships_created:
-                if r not in all_relationships_created:
+                if r not in seen_relationships:
+                    seen_relationships.add(r)
                     all_relationships_created.append(r)
 
     log.info(

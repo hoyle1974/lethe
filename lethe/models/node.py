@@ -140,7 +140,7 @@ class DocumentItem(BaseModel):
 
 class CorpusIngestRequest(BaseModel):
     corpus_id: str | None = None
-    documents: list[DocumentItem]
+    documents: list[DocumentItem] = Field(..., min_length=1)
     user_id: str = DEFAULT_USER_ID
     domain: str = DEFAULT_DOMAIN
     chunk_size: int = DEFAULT_CHUNK_SIZE
