@@ -120,11 +120,11 @@ async def extract_triples(
             max_tokens=LLM_MAX_TOKENS_EXTRACTION,
         )
     )
-    log.info("extraction: raw LLM response:\n%s", raw)
+    log.debug("extraction: raw LLM response:\n%s", raw)
     status, triples = parse_refinery_output(raw)
     log.info("extraction: parsed status=%r triples=%d", status, len(triples))
     for t in triples:
-        log.info(
+        log.debug(
             "extraction: triple %r | %r | %r (sub_type=%r obj_type=%r new=%s)",
             t.subject,
             t.predicate,

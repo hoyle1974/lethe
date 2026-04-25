@@ -137,12 +137,21 @@ AUTH_TOKEN=$(gcloud auth print-identity-token)
 DOCS_JSON="[]"
 for filepath in "${FILES[@]}"; do
   filename=$(basename "$filepath")
+  if [ ! -s "$filepath" ]; then
+    echo "Skipping empty file: $filename" >&2
+    continue
+  fi
   file_content=$(jq -Rs '.' < "$filepath")
   DOCS_JSON=$(echo "$DOCS_JSON" | jq \
     --arg filename "$filename" \
     --argjson text "$file_content" \
     '. + [{"text": $text, "filename": $filename}]')
 done
+
+if [ "$(echo "$DOCS_JSON" | jq 'length')" -eq 0 ]; then
+  echo "Error: no non-empty files to ingest"
+  exit 1
+fi
 
 # Build final payload
 PAYLOAD=$(jq -n \

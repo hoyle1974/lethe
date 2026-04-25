@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI):
     await seed_canonical_map(app.state.db)
     app.state.canonical_map = await load_canonical_map(app.state.db)
     logging.basicConfig(level=config.log_level.upper())
+    logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     yield
 
 

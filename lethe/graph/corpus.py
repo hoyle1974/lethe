@@ -87,7 +87,14 @@ async def run_corpus_ingest(
     seen_relationships: set[str] = set()
     total_chunks = 0
 
-    for doc in documents:
+    total_docs = len(documents)
+    for doc_idx, doc in enumerate(documents):
+        log.info(
+            "corpus: [%d/%d] starting %r",
+            doc_idx + 1,
+            total_docs,
+            doc.filename,
+        )
         doc_id = await _create_document_node(
             db=db,
             embedder=embedder,
@@ -103,13 +110,23 @@ async def run_corpus_ingest(
 
         chunks = chunk_document(doc.text, doc.filename, chunk_size)
         log.info(
-            "corpus: document doc_id=%s filename=%r split into %d chunks",
-            doc_id,
+            "corpus: [%d/%d] %r → %d chunks (doc_id=%s)",
+            doc_idx + 1,
+            total_docs,
             doc.filename,
             len(chunks),
+            doc_id,
         )
 
         for i, chunk_text in enumerate(chunks):
+            log.info(
+                "corpus: [%d/%d] %r chunk %d/%d",
+                doc_idx + 1,
+                total_docs,
+                doc.filename,
+                i + 1,
+                len(chunks),
+            )
             result = await run_ingest(
                 db=db,
                 embedder=embedder,

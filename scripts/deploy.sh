@@ -85,6 +85,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --memory=512Mi \
   --cpu=1 \
   --concurrency=80 \
+  --timeout=3600 \
   --set-env-vars="$ENV_VARS" \
   --quiet
 

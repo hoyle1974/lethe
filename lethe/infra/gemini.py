@@ -1,8 +1,4 @@
-import asyncio
 import logging
-
-import vertexai
-from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
 
 from lethe.config import Config
 from lethe.constants import EMBEDDING_TASK_RETRIEVAL_DOCUMENT
@@ -29,26 +25,32 @@ def _build_gemini_client(project: str, location: str):
 
 class GeminiEmbedder:
     def __init__(self, config: Config) -> None:
-        vertexai.init(project=config.google_cloud_project, location=config.lethe_region)
-        self._model = TextEmbeddingModel.from_pretrained(config.lethe_embedding_model)
+        self._model_name = config.lethe_embedding_model
+        self._client = _build_gemini_client(config.google_cloud_project, config.lethe_region)
 
     async def embed(
         self,
         text: str,
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     ) -> list[float]:
-        inputs = [TextEmbeddingInput(text, task_type)]
-        results = await asyncio.to_thread(self._model.get_embeddings, inputs)
-        return list(results[0].values)
+        result = await self._client.aio.models.embed_content(
+            model=self._model_name,
+            contents=text,
+            config=genai_types.EmbedContentConfig(task_type=task_type),
+        )
+        return list(result.embeddings[0].values)
 
     async def embed_batch(
         self,
         texts: list[str],
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     ) -> list[list[float]]:
-        inputs = [TextEmbeddingInput(t, task_type) for t in texts]
-        results = await asyncio.to_thread(self._model.get_embeddings, inputs)
-        return [list(r.values) for r in results]
+        result = await self._client.aio.models.embed_content(
+            model=self._model_name,
+            contents=texts,
+            config=genai_types.EmbedContentConfig(task_type=task_type),
+        )
+        return [list(e.values) for e in result.embeddings]
 
 
 class GeminiLLM:

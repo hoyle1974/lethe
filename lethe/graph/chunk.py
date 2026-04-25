@@ -96,15 +96,13 @@ def chunk_code(text: str, chunk_size: int = 600) -> list[str]:
     preamble = "".join(preamble_lines).strip()
     chunks: list[str] = []
 
-    for block in blocks:
+    for i, block in enumerate(blocks):
         block_text = "".join(block).strip()
-        content = f"{preamble}\n\n{block_text}" if preamble else block_text
+        # Include preamble only on first chunk so imports aren't re-extracted N times.
+        prefix = preamble if (preamble and i == 0) else ""
+        content = f"{prefix}\n\n{block_text}" if prefix else block_text
         if len(content.split()) > chunk_size * 2:
             sub_chunks = chunk_text(content, chunk_size)
-            if preamble:
-                sub_chunks = [
-                    c if c.startswith(preamble) else f"{preamble}\n\n{c}" for c in sub_chunks
-                ]
             chunks.extend(sub_chunks)
         else:
             chunks.append(content)

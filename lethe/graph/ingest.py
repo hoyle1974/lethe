@@ -90,7 +90,7 @@ async def run_ingest(
     )
     log.info("ingest: extraction status=%s triples=%d", status, len(triples))
     for t in triples:
-        log.info(
+        log.debug(
             "ingest: triple subject=%r predicate=%r object=%r",
             t.subject,
             t.canonical_predicate,

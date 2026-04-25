@@ -1,44 +1,13 @@
 """
-conftest.py — shared fixtures and module stubs for tests.
-
-Stubs out vertexai (google-cloud-aiplatform) so tests run without
-the heavy GCP AI Platform installation.
+conftest.py — shared fixtures and mock implementations for tests.
 """
-
-import sys
-import types
-from unittest.mock import MagicMock
-
-# ---------------------------------------------------------------------------
-# Stub out vertexai before any lethe module imports it
-# ---------------------------------------------------------------------------
-_vertexai = types.ModuleType("vertexai")
-_vertexai.init = MagicMock()
-
-_language_models = types.ModuleType("vertexai.language_models")
-_TextEmbeddingModel = MagicMock()
-_TextEmbeddingInput = MagicMock()
-_language_models.TextEmbeddingModel = _TextEmbeddingModel
-_language_models.TextEmbeddingInput = _TextEmbeddingInput
-
-_generative_models = types.ModuleType("vertexai.generative_models")
-_GenerativeModel = MagicMock()
-_GenerationConfig = MagicMock()
-_generative_models.GenerativeModel = _GenerativeModel
-_generative_models.GenerationConfig = _GenerationConfig
-_generative_models.Content = MagicMock()
-_generative_models.Part = MagicMock()
-
-sys.modules.setdefault("vertexai", _vertexai)
-sys.modules.setdefault("vertexai.language_models", _language_models)
-sys.modules.setdefault("vertexai.generative_models", _generative_models)
 
 # ---------------------------------------------------------------------------
 # Mock embedder and LLM implementations for tests
 # ---------------------------------------------------------------------------
-import hashlib  # noqa: E402
+import hashlib
 
-import pytest  # noqa: E402
+import pytest
 
 
 class MockEmbedder:
