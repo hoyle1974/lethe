@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -55,6 +56,7 @@ async def run_ingest(
     source: Optional[str] = None,
     user_id: str = DEFAULT_USER_ID,
     timestamp: Optional[str] = None,
+    metadata: Optional[dict] = None,
 ) -> IngestResponse:
     ts = timestamp or datetime.now(timezone.utc).isoformat()
     entry_uuid = str(uuid.uuid4())
@@ -68,7 +70,7 @@ async def run_ingest(
             "content": text,
             "domain": domain,
             "weight": DEFAULT_LOG_WEIGHT,
-            "metadata": "{}",
+            "metadata": json.dumps(metadata) if metadata else "{}",
             "embedding": Vector(vector),
             "user_id": user_id,
             "source": source,
