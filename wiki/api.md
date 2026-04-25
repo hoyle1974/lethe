@@ -123,6 +123,7 @@ Tombstoned nodes (weight 0.0) are excluded.
 | `self_seed_neighbor_floor` | int | no | 40 | Min SELF-node neighbors guaranteed at hop 1 |
 | `user_id` | string | no | `"global"` | User scope |
 | `debug` | bool | no | false | Include debug_reasoning in response |
+| `source_filter` | string | no | null | If set, exclude BFS candidates whose `source` != this value (nodes with `source=null` always pass) |
 
 **Response** (`GraphExpandResponse`):
 ```json
@@ -136,7 +137,8 @@ Tombstoned nodes (weight 0.0) are excluded.
 
 ## POST /v1/graph/summarize
 LLM-grounded summary of a graph neighbourhood. Two-pass retrieval loop.
-Uses same request schema as `/v1/graph/expand` (including `debug`).
+Uses same request schema as `/v1/graph/expand` (including `debug` and `source_filter`).
+`source_filter` is applied on both BFS passes.
 
 **Response** (`GraphSummarizeResponse`):
 ```json

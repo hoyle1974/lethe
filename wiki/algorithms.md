@@ -88,6 +88,8 @@ graph_expand(seed_ids, query, hops, limit_per_edge, user_id, self_seed_neighbor_
 
 **Tombstone exclusion**: nodes with `weight == 0.0` are excluded (`_is_alive()` check); edges with `weight <= 0.0` are skipped.
 
+**Source filter**: When `source_filter` is set, candidates are pre-filtered before `prune_frontier_by_similarity`. A candidate passes if `node.source is None` (shared entity) or `node.source == source_filter`. Seed nodes are filtered the same way. Use this to scope expansion to a single corpus while keeping shared entity nodes reachable.
+
 ---
 
 ## 6. Graph Summarization (two-pass, `lethe/routers/graph.py`)
