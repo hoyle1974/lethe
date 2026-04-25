@@ -70,7 +70,8 @@ async def test_fetch_source_logs_returns_log_nodes_for_entities():
 
     assert "ent-1" in result
     contents = [n.content for n in result["ent-1"]]
-    assert "First entry" in contents or "Second entry" in contents
+    assert "First entry" in contents
+    assert "Second entry" in contents
 
 
 @pytest.mark.asyncio

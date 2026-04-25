@@ -37,12 +37,17 @@ async def fetch_source_logs(
     if not per_entity:
         return {}
 
-    id_to_entities: dict[str, list[str]] = {}
-    for entity_uuid, log_ids in per_entity.items():
+    seen: set[str] = set()
+    fetch_ids: list[str] = []
+    for log_ids in per_entity.values():
         for log_id in log_ids:
-            id_to_entities.setdefault(log_id, []).append(entity_uuid)
-
-    fetch_ids = list(id_to_entities.keys())[:max_total]
+            if log_id not in seen:
+                seen.add(log_id)
+                fetch_ids.append(log_id)
+                if len(fetch_ids) >= max_total:
+                    break
+        if len(fetch_ids) >= max_total:
+            break
 
     col = db.collection(config.lethe_collection)
     fetched: dict[str, Node] = {}
