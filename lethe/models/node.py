@@ -4,7 +4,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
-from lethe.constants import DEFAULT_DOMAIN, DEFAULT_RELATIONSHIP_WEIGHT, DEFAULT_USER_ID
+from lethe.constants import (
+    DEFAULT_DOMAIN,
+    DEFAULT_RELATIONSHIP_WEIGHT,
+    DEFAULT_USER_ID,
+    SOURCE_LOG_SNIPPET_LENGTH,
+)
 
 
 class Node(BaseModel):
@@ -87,20 +92,31 @@ class GraphExpandResponse(BaseModel):
     nodes: dict[str, Node]
     edges: list[Edge]
 
-    def to_markdown(self, seed_ids: list[str]) -> str:
+    def to_markdown(
+        self,
+        seed_ids: list[str],
+        source_logs: dict[str, list[Node]] | None = None,
+    ) -> str:
         lines = ["## Knowledge Graph\n"]
         for uuid, node in self.nodes.items():
+            if node.node_type == "log":
+                continue
             marker = " [SEED]" if uuid in seed_ids else ""
             lines.append(
                 f"- **{node.node_type}** `{uuid[:8]}`{marker}: {node.content} "
                 f"(metadata={node.metadata})"
             )
-            if node.journal_entry_ids:
+            log_nodes: list[Node] = []
+            if source_logs and uuid in source_logs:
+                log_nodes = source_logs[uuid]
+            else:
                 for log_id in reversed(node.journal_entry_ids):
                     log_node = self.nodes.get(log_id)
                     if log_node and log_node.node_type == "log":
-                        snippet = (log_node.content or "")[:150]
-                        lines.append(f"  - Source Snippet: {snippet}")
+                        log_nodes.append(log_node)
+            for log_node in log_nodes:
+                snippet = (log_node.content or "")[:SOURCE_LOG_SNIPPET_LENGTH]
+                lines.append(f'  [source] "{snippet}"')
         lines.append("\n## Relationships\n")
         for edge in self.edges:
             subj = self.nodes.get(edge.subject_uuid)

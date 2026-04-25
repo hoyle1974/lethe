@@ -82,7 +82,8 @@ def test_graph_expand_to_markdown():
     assert "[SEED]" in md
 
 
-def test_graph_expand_to_markdown_includes_metadata_and_recent_log_snippet():
+def test_graph_expand_to_markdown_includes_log_snippet_from_self_nodes():
+    """Falls back to log nodes already in self.nodes when no source_logs provided."""
     r = GraphExpandResponse(
         nodes={
             "entity": Node(
@@ -92,25 +93,54 @@ def test_graph_expand_to_markdown_includes_metadata_and_recent_log_snippet():
                 metadata='{"role":"engineer"}',
                 journal_entry_ids=["log-old", "log-new"],
             ),
-            "log-old": Node(
-                uuid="log-old",
-                node_type="log",
-                content="Old note",
-            ),
+            "log-old": Node(uuid="log-old", node_type="log", content="Old note"),
             "log-new": Node(
                 uuid="log-new",
                 node_type="log",
-                content="Recent note " + ("x" * 200),
+                content="Recent note " + ("x" * 300),
             ),
         },
         edges=[],
     )
     md = r.to_markdown(seed_ids=["entity"])
     assert 'metadata={"role":"engineer"}' in md
-    assert "Source Snippet: Recent note " in md
-    source_line = next(line for line in md.splitlines() if "Source Snippet:" in line)
-    snippet = source_line.split("Source Snippet: ", 1)[1]
-    assert len(snippet) <= 150
+    assert "[source]" in md
+    source_line = next(line for line in md.splitlines() if "[source]" in line)
+    snippet = source_line.split('"', 1)[1].rsplit('"', 1)[0]
+    assert len(snippet) <= 250
+
+
+def test_graph_expand_to_markdown_uses_source_logs_when_provided():
+    """source_logs parameter takes priority over log nodes in self.nodes."""
+    entity = Node(
+        uuid="ent-1",
+        node_type="person",
+        content="Jack",
+        journal_entry_ids=["log-1"],
+    )
+    log_node = Node(
+        uuid="log-1",
+        node_type="log",
+        content="Jack started working on Lethe last month",
+    )
+    r = GraphExpandResponse(
+        nodes={"ent-1": entity},  # log-1 NOT in self.nodes
+        edges=[],
+    )
+    source_logs = {"ent-1": [log_node]}
+    md = r.to_markdown(seed_ids=["ent-1"], source_logs=source_logs)
+    assert "Jack started working on Lethe last month" in md
+    assert "[source]" in md
+
+
+def test_graph_expand_to_markdown_no_source_logs_no_snippet():
+    """When no source_logs and no log nodes in self.nodes, no [source] line."""
+    r = GraphExpandResponse(
+        nodes={"ent-1": Node(uuid="ent-1", node_type="person", content="Alice")},
+        edges=[],
+    )
+    md = r.to_markdown(seed_ids=["ent-1"])
+    assert "[source]" not in md
 
 
 def test_node_has_no_spo_fields():
