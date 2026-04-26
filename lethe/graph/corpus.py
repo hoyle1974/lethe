@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import hashlib
 import json
 import logging
 import uuid
@@ -10,6 +13,7 @@ from google.cloud import firestore
 from lethe.config import Config
 from lethe.constants import (
     CHUNK_NODE_WEIGHT,
+    CORPUS_LLM_CONCURRENCY,
     CORPUS_NODE_WEIGHT,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_DOMAIN,
@@ -31,14 +35,28 @@ from lethe.graph.ensure_node import (
 from lethe.graph.extraction import summarize_document
 from lethe.graph.ingest import run_ingest
 from lethe.infra.embedder import Embedder
-from lethe.infra.fs_helpers import Vector
+from lethe.infra.fs_helpers import FieldFilter, Vector
 from lethe.infra.llm import LLMDispatcher
 from lethe.models.node import CorpusIngestResponse, DocumentItem, IngestResponse
 
 log = logging.getLogger(__name__)
 
 
-async def _create_document_node(
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def stable_document_id(corpus_id: str, filename: str) -> str:
+    key = f"document:{corpus_id}:{filename}"
+    return "doc_" + hashlib.sha1(key.encode()).hexdigest()
+
+
+def stable_corpus_node_id(corpus_id: str) -> str:
+    key = f"corpus:{corpus_id}"
+    return "corpus_" + hashlib.sha1(key.encode()).hexdigest()
+
+
+async def _upsert_document_node(
     db: firestore.AsyncClient,
     embedder: Embedder,
     config: Config,
@@ -48,10 +66,44 @@ async def _create_document_node(
     user_id: str,
     domain: str,
     ts: str,
-) -> str:
-    doc_id = str(uuid.uuid4())
+) -> tuple[str, bool, bool]:
+    """Upsert a document node. Returns (doc_id, is_new, is_changed)."""
+    doc_id = stable_document_id(corpus_id, filename)
+    snap = await db.collection(config.lethe_collection).document(doc_id).get()
+    content_hash = _content_hash(text)
+
+    if snap.exists:
+        try:
+            existing_meta = json.loads(snap.get("metadata") or "{}")
+        except (TypeError, ValueError):
+            existing_meta = {}
+        if existing_meta.get("content_hash") == content_hash:
+            log.info("corpus: skip unchanged doc_id=%s filename=%r", doc_id, filename)
+            return doc_id, False, False
+
+        vector = await embedder.embed(text[:10_000], EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
+        metadata = json.dumps(
+            {"filename": filename, "corpus_id": corpus_id, "content_hash": content_hash}
+        )
+        await (
+            db.collection(config.lethe_collection)
+            .document(doc_id)
+            .update(
+                {
+                    "content": text,
+                    "metadata": metadata,
+                    "embedding": Vector(vector),
+                    "updated_at": ts,
+                }
+            )
+        )
+        log.info("corpus: updated document node doc_id=%s filename=%r", doc_id, filename)
+        return doc_id, False, True
+
     vector = await embedder.embed(text[:10_000], EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
-    metadata = json.dumps({"filename": filename, "corpus_id": corpus_id})
+    metadata = json.dumps(
+        {"filename": filename, "corpus_id": corpus_id, "content_hash": content_hash}
+    )
     await (
         db.collection(config.lethe_collection)
         .document(doc_id)
@@ -71,10 +123,10 @@ async def _create_document_node(
         )
     )
     log.info("corpus: created document node doc_id=%s filename=%r", doc_id, filename)
-    return doc_id
+    return doc_id, True, True
 
 
-async def _create_corpus_node(
+async def _upsert_corpus_node(
     db: firestore.AsyncClient,
     embedder: Embedder,
     config: Config,
@@ -83,12 +135,31 @@ async def _create_corpus_node(
     user_id: str,
     domain: str,
     ts: str,
-) -> str:
-    node_id = str(uuid.uuid4())
+) -> tuple[str, bool]:
+    """Upsert a corpus hub node. Returns (node_id, is_new)."""
+    node_id = stable_corpus_node_id(corpus_id)
+    snap = await db.collection(config.lethe_collection).document(node_id).get()
     files_summary = ", ".join(filenames) if filenames else "(no files)"
     content = f"Corpus '{corpus_id}': {files_summary}"
     vector = await embedder.embed(content, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
     metadata = json.dumps({"corpus_id": corpus_id, "file_count": len(filenames)})
+
+    if snap.exists:
+        await (
+            db.collection(config.lethe_collection)
+            .document(node_id)
+            .update(
+                {
+                    "content": content,
+                    "metadata": metadata,
+                    "embedding": Vector(vector),
+                    "updated_at": ts,
+                }
+            )
+        )
+        log.info("corpus: updated corpus node corpus_node_id=%s corpus_id=%r", node_id, corpus_id)
+        return node_id, False
+
     await (
         db.collection(config.lethe_collection)
         .document(node_id)
@@ -108,7 +179,7 @@ async def _create_corpus_node(
         )
     )
     log.info("corpus: created corpus node corpus_node_id=%s corpus_id=%r", node_id, corpus_id)
-    return node_id
+    return node_id, True
 
 
 async def _create_chunk_node(
@@ -144,6 +215,7 @@ async def _create_chunk_node(
                 "domain": domain,
                 "weight": CHUNK_NODE_WEIGHT,
                 "metadata": metadata,
+                "document_id": document_id,
                 "embedding": Vector(vector),
                 "user_id": user_id,
                 "source": corpus_id,
@@ -159,6 +231,36 @@ async def _create_chunk_node(
         chunk_index,
     )
     return chunk_id
+
+
+async def _tombstone_chunks_for_document(
+    db: firestore.AsyncClient,
+    config: Config,
+    document_id: str,
+    user_id: str,
+) -> None:
+    col = db.collection(config.lethe_collection)
+    q = col.where(filter=FieldFilter("document_id", "==", document_id)).where(
+        filter=FieldFilter("user_id", "==", user_id)
+    )
+    snaps = await q.get()
+    for snap in snaps:
+        await col.document(snap.id).update({"weight": 0.0})
+    log.info("corpus: tombstoned %d chunks for document_id=%s", len(snaps), document_id)
+
+
+async def _get_existing_chunk_ids(
+    db: firestore.AsyncClient,
+    config: Config,
+    document_id: str,
+    user_id: str,
+) -> list[str]:
+    col = db.collection(config.lethe_collection)
+    q = col.where(filter=FieldFilter("document_id", "==", document_id)).where(
+        filter=FieldFilter("user_id", "==", user_id)
+    )
+    snaps = await q.get()
+    return [snap.id for snap in snaps if (snap.get("weight") or 0.0) > 0.0]
 
 
 async def _node_exists_by_type(
@@ -214,17 +316,18 @@ async def _ingest_structural_edges(
     user_id: str,
     domain: str,
     ts: str,
-    nodes_created: list[str],
-    nodes_updated: list[str],
-    relationships_created: list[str],
-    seen_created: set[str],
-    seen_updated: set[str],
-    seen_relationships: set[str],
-) -> None:
-    """Write deterministic code-structure edges to the graph without LLM calls."""
+) -> tuple[list[str], list[str], list[str]]:
+    """Write deterministic code-structure edges. Returns (nodes_created, nodes_updated, rels)."""
     triples = extract_structural_triples(text, filename)
     if not triples:
-        return
+        return [], [], []
+
+    nodes_created: list[str] = []
+    nodes_updated: list[str] = []
+    relationships_created: list[str] = []
+    seen_created: set[str] = set()
+    seen_updated: set[str] = set()
+    seen_relationships: set[str] = set()
 
     log.info("corpus: structural edges filename=%r triples=%d", filename, len(triples))
     for subj, pred, obj in triples:
@@ -287,63 +390,87 @@ async def _ingest_structural_edges(
             seen_relationships.add(rel_id)
             relationships_created.append(rel_id)
 
+    return nodes_created, nodes_updated, relationships_created
 
-async def run_corpus_ingest(
+
+@dataclasses.dataclass
+class _DocPipelineResult:
+    doc_id: str
+    chunk_ids: list[str]
+    nodes_created: list[str]
+    nodes_updated: list[str]
+    relationships_created: list[str]
+
+
+class _RateLimitedLLM:
+    """LLM wrapper that limits concurrent dispatches via a semaphore.
+
+    All document pipelines run fully in parallel; only the LLM calls
+    (summarize + extract_triples) are throttled at this layer.
+    """
+
+    def __init__(self, llm: LLMDispatcher, semaphore: asyncio.Semaphore) -> None:
+        self._llm = llm
+        self._sem = semaphore
+
+    async def dispatch(self, req: object) -> str:
+        async with self._sem:
+            return await self._llm.dispatch(req)  # type: ignore[arg-type]
+
+
+async def _process_document_pipeline(
     db: firestore.AsyncClient,
     embedder: Embedder,
     llm: LLMDispatcher,
     config: Config,
     canonical_map: CanonicalMap,
-    documents: list[DocumentItem],
-    corpus_id: str | None = None,
-    user_id: str = DEFAULT_USER_ID,
-    domain: str = DEFAULT_DOMAIN,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-) -> CorpusIngestResponse:
-    corpus_id = corpus_id or str(uuid.uuid4())
-    ts = datetime.now(timezone.utc).isoformat()
+    doc: DocumentItem,
+    doc_id: str,
+    is_new: bool,
+    is_changed: bool,
+    corpus_id: str,
+    corpus_node_id: str,
+    user_id: str,
+    domain: str,
+    chunk_size: int,
+    ts: str,
+    doc_idx: int,
+    total_docs: int,
+) -> _DocPipelineResult:
+    if not is_changed:
+        existing = await _get_existing_chunk_ids(db, config, doc_id, user_id)
+        log.info(
+            "corpus: [%d/%d] skip unchanged %r (doc_id=%s chunks=%d)",
+            doc_idx + 1,
+            total_docs,
+            doc.filename,
+            doc_id,
+            len(existing),
+        )
+        return _DocPipelineResult(
+            doc_id=doc_id,
+            chunk_ids=existing,
+            nodes_created=[],
+            nodes_updated=[],
+            relationships_created=[],
+        )
 
-    document_ids: list[str] = []
-    chunk_ids: list[str] = []
-    all_nodes_created: list[str] = []
-    all_nodes_updated: list[str] = []
-    all_relationships_created: list[str] = []
+    nodes_created: list[str] = []
+    nodes_updated: list[str] = []
+    relationships_created: list[str] = []
     seen_created: set[str] = set()
     seen_updated: set[str] = set()
     seen_relationships: set[str] = set()
-    total_chunks = 0
 
-    filenames = [doc.filename for doc in documents]
-    corpus_node_id = await _create_corpus_node(
-        db=db,
-        embedder=embedder,
-        config=config,
-        corpus_id=corpus_id,
-        filenames=filenames,
-        user_id=user_id,
-        domain=domain,
-        ts=ts,
-    )
-    seen_created.add(corpus_node_id)
-    all_nodes_created.append(corpus_node_id)
+    log.info("corpus: [%d/%d] starting %r", doc_idx + 1, total_docs, doc.filename)
 
-    total_docs = len(documents)
-    for doc_idx, doc in enumerate(documents):
-        log.info("corpus: [%d/%d] starting %r", doc_idx + 1, total_docs, doc.filename)
-
-        doc_id = await _create_document_node(
-            db=db,
-            embedder=embedder,
-            config=config,
-            text=doc.text,
-            filename=doc.filename,
-            corpus_id=corpus_id,
-            user_id=user_id,
-            domain=domain,
-            ts=ts,
-        )
-        document_ids.append(doc_id)
-
+    if not is_new:
+        seen_updated.add(doc_id)
+        nodes_updated.append(doc_id)
+        await _tombstone_chunks_for_document(db, config, doc_id, user_id)
+    else:
+        seen_created.add(doc_id)
+        nodes_created.append(doc_id)
         rel_id = await create_relationship_node(
             db=db,
             embedder=embedder,
@@ -360,93 +487,219 @@ async def run_corpus_ingest(
         )
         if rel_id not in seen_relationships:
             seen_relationships.add(rel_id)
-            all_relationships_created.append(rel_id)
+            relationships_created.append(rel_id)
 
-        # One LLM summary per document → SPO extraction on summary only
-        summary = await summarize_document(llm=llm, text=doc.text, filename=doc.filename)
-        log.info(
-            "corpus: [%d/%d] summary=%d chars filename=%r",
-            doc_idx + 1,
-            total_docs,
-            len(summary),
-            doc.filename,
+    summary = await summarize_document(llm=llm, text=doc.text, filename=doc.filename)
+    log.info(
+        "corpus: [%d/%d] summary=%d chars filename=%r",
+        doc_idx + 1,
+        total_docs,
+        len(summary),
+        doc.filename,
+    )
+    if summary:
+        summary_result = await run_ingest(
+            db=db,
+            embedder=embedder,
+            llm=llm,
+            config=config,
+            canonical_map=canonical_map,
+            text=summary,
+            domain=domain,
+            source=corpus_id,
+            user_id=user_id,
+            timestamp=ts,
+            metadata={
+                "document_id": doc_id,
+                "filename": doc.filename,
+                "is_summary": True,
+            },
         )
-        if summary:
-            summary_result = await run_ingest(
-                db=db,
-                embedder=embedder,
-                llm=llm,
-                config=config,
-                canonical_map=canonical_map,
-                text=summary,
-                domain=domain,
-                source=corpus_id,
-                user_id=user_id,
-                timestamp=ts,
-                metadata={
-                    "document_id": doc_id,
-                    "filename": doc.filename,
-                    "is_summary": True,
-                },
-            )
-            _merge_ingest_result(
-                summary_result,
-                seen_created,
-                seen_updated,
-                seen_relationships,
-                all_nodes_created,
-                all_nodes_updated,
-                all_relationships_created,
-            )
-
-        # Chunks stored as vector-indexed nodes — no SPO extraction
-        chunks = chunk_document(doc.text, doc.filename, chunk_size)
-        log.info(
-            "corpus: [%d/%d] %r → %d chunks (doc_id=%s)",
-            doc_idx + 1,
-            total_docs,
-            doc.filename,
-            len(chunks),
-            doc_id,
+        _merge_ingest_result(
+            summary_result,
+            seen_created,
+            seen_updated,
+            seen_relationships,
+            nodes_created,
+            nodes_updated,
+            relationships_created,
         )
-        for i, chunk_text in enumerate(chunks):
-            chunk_id = await _create_chunk_node(
-                db=db,
-                embedder=embedder,
-                config=config,
-                text=chunk_text,
-                document_id=doc_id,
-                corpus_id=corpus_id,
-                filename=doc.filename,
-                chunk_index=i,
-                user_id=user_id,
-                domain=domain,
-                ts=ts,
-            )
-            chunk_ids.append(chunk_id)
-            total_chunks += 1
 
-        # Code files get deterministic structural edges (no LLM)
-        if detect_chunk_strategy(doc.filename) == "code":
-            await _ingest_structural_edges(
+    chunks = chunk_document(doc.text, doc.filename, chunk_size)
+    log.info(
+        "corpus: [%d/%d] %r → %d chunks (doc_id=%s)",
+        doc_idx + 1,
+        total_docs,
+        doc.filename,
+        len(chunks),
+        doc_id,
+    )
+    chunk_ids: list[str] = []
+    for i, chunk_text in enumerate(chunks):
+        chunk_id = await _create_chunk_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            text=chunk_text,
+            document_id=doc_id,
+            corpus_id=corpus_id,
+            filename=doc.filename,
+            chunk_index=i,
+            user_id=user_id,
+            domain=domain,
+            ts=ts,
+        )
+        chunk_ids.append(chunk_id)
+
+    if detect_chunk_strategy(doc.filename) == "code":
+        struct_created, struct_updated, struct_rels = await _ingest_structural_edges(
+            db=db,
+            embedder=embedder,
+            config=config,
+            text=doc.text,
+            filename=doc.filename,
+            document_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            domain=domain,
+            ts=ts,
+        )
+        for n in struct_created:
+            if n not in seen_created:
+                seen_created.add(n)
+                nodes_created.append(n)
+        for n in struct_updated:
+            if n not in seen_created and n not in seen_updated:
+                seen_updated.add(n)
+                nodes_updated.append(n)
+        for r in struct_rels:
+            if r not in seen_relationships:
+                seen_relationships.add(r)
+                relationships_created.append(r)
+
+    return _DocPipelineResult(
+        doc_id=doc_id,
+        chunk_ids=chunk_ids,
+        nodes_created=nodes_created,
+        nodes_updated=nodes_updated,
+        relationships_created=relationships_created,
+    )
+
+
+async def run_corpus_ingest(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    llm: LLMDispatcher,
+    config: Config,
+    canonical_map: CanonicalMap,
+    documents: list[DocumentItem],
+    corpus_id: str | None = None,
+    user_id: str = DEFAULT_USER_ID,
+    domain: str = DEFAULT_DOMAIN,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> CorpusIngestResponse:
+    corpus_id = corpus_id or str(uuid.uuid4())
+    ts = datetime.now(timezone.utc).isoformat()
+
+    filenames = [doc.filename for doc in documents]
+
+    # Phase 1: upsert corpus node + classify all documents in parallel.
+    # _upsert_document_node is fast (one Firestore get + maybe embed); no LLM.
+    corpus_result, *doc_classifications = await asyncio.gather(
+        _upsert_corpus_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            corpus_id=corpus_id,
+            filenames=filenames,
+            user_id=user_id,
+            domain=domain,
+            ts=ts,
+        ),
+        *[
+            _upsert_document_node(
                 db=db,
                 embedder=embedder,
                 config=config,
                 text=doc.text,
                 filename=doc.filename,
-                document_id=doc_id,
                 corpus_id=corpus_id,
                 user_id=user_id,
                 domain=domain,
                 ts=ts,
-                nodes_created=all_nodes_created,
-                nodes_updated=all_nodes_updated,
-                relationships_created=all_relationships_created,
-                seen_created=seen_created,
-                seen_updated=seen_updated,
-                seen_relationships=seen_relationships,
             )
+            for doc in documents
+        ],
+    )
+    corpus_node_id, corpus_is_new = corpus_result
 
+    # Phase 2: all document pipelines run fully in parallel.
+    # LLM calls inside each pipeline are throttled via _RateLimitedLLM so
+    # at most CORPUS_LLM_CONCURRENCY generate_content requests are in flight
+    # at any time. Embedding and Firestore writes are unrestricted.
+    rate_limited_llm = _RateLimitedLLM(llm, asyncio.Semaphore(CORPUS_LLM_CONCURRENCY))
+    doc_results: list[_DocPipelineResult] = await asyncio.gather(
+        *[
+            _process_document_pipeline(
+                db=db,
+                embedder=embedder,
+                llm=rate_limited_llm,
+                config=config,
+                canonical_map=canonical_map,
+                doc=doc,
+                doc_id=doc_id,
+                is_new=is_new,
+                is_changed=is_changed,
+                corpus_id=corpus_id,
+                corpus_node_id=corpus_node_id,
+                user_id=user_id,
+                domain=domain,
+                chunk_size=chunk_size,
+                ts=ts,
+                doc_idx=doc_idx,
+                total_docs=len(documents),
+            )
+            for doc_idx, (doc, (doc_id, is_new, is_changed)) in enumerate(
+                zip(documents, doc_classifications)
+            )
+        ]
+    )
+
+    # Aggregate results with global deduplication.
+    document_ids: list[str] = []
+    chunk_ids: list[str] = []
+    all_nodes_created: list[str] = []
+    all_nodes_updated: list[str] = []
+    all_relationships_created: list[str] = []
+    seen_created: set[str] = set()
+    seen_updated: set[str] = set()
+    seen_relationships: set[str] = set()
+
+    if corpus_is_new:
+        seen_created.add(corpus_node_id)
+        all_nodes_created.append(corpus_node_id)
+    else:
+        seen_updated.add(corpus_node_id)
+        all_nodes_updated.append(corpus_node_id)
+
+    for result in doc_results:
+        document_ids.append(result.doc_id)
+        chunk_ids.extend(result.chunk_ids)
+        for n in result.nodes_created:
+            if n not in seen_created:
+                seen_created.add(n)
+                seen_updated.discard(n)
+                all_nodes_created.append(n)
+        for n in result.nodes_updated:
+            if n not in seen_created and n not in seen_updated:
+                seen_updated.add(n)
+                all_nodes_updated.append(n)
+        for r in result.relationships_created:
+            if r not in seen_relationships:
+                seen_relationships.add(r)
+                all_relationships_created.append(r)
+
+    total_chunks = len(chunk_ids)
     log.info(
         "corpus: complete corpus_id=%s documents=%d chunks=%d nodes_created=%d",
         corpus_id,

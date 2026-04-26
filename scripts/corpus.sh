@@ -179,13 +179,22 @@ echo "User:   $USER_ID"
 echo "Ingesting into: $BASE_URL"
 echo ""
 
-RESPONSE=$(curl -s -X POST "$BASE_URL/v1/ingest/corpus" \
+HTTP_STATUS=$(curl -s -o /tmp/lethe_corpus_response.json -w "%{http_code}" \
+  -X POST "$BASE_URL/v1/ingest/corpus" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
-  -d "$PAYLOAD")
+  --data-binary @- <<< "$PAYLOAD")
+RESPONSE=$(cat /tmp/lethe_corpus_response.json)
+
+if [ "$HTTP_STATUS" != "201" ]; then
+  echo "Error: server returned HTTP $HTTP_STATUS"
+  echo "$RESPONSE"
+  exit 1
+fi
 
 echo "$RESPONSE" | jq '{
   corpus_id,
+  corpus_node_id,
   document_ids_count: (.document_ids | length),
   total_chunks,
   nodes_created: (.nodes_created | length),

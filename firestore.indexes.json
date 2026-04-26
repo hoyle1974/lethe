@@ -4,6 +4,14 @@
       "collectionGroup": "nodes",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "document_id", "order": "ASCENDING" },
+        { "fieldPath": "user_id", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "nodes",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "user_id", "order": "ASCENDING" },
         { "fieldPath": "node_type", "order": "ASCENDING" },
         { "fieldPath": "updated_at", "order": "DESCENDING" }

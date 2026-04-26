@@ -1,9 +1,12 @@
+import asyncio
 import logging
 
 from lethe.config import Config
 from lethe.constants import EMBEDDING_TASK_RETRIEVAL_DOCUMENT
 from lethe.infra.llm import LLMRequest
 from lethe.types import EmbeddingTaskType
+
+_LLM_CALL_TIMEOUT_SECONDS = 180
 
 try:
     from google import genai
@@ -103,10 +106,13 @@ class GeminiLLM:
             generation_config: object = genai_types.GenerateContentConfig(**config_kwargs)
         else:
             generation_config = config_kwargs
-        return await self._client.aio.models.generate_content(
-            model=self._model_name,
-            contents=req.user_prompt,
-            config=generation_config,
+        return await asyncio.wait_for(
+            self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=req.user_prompt,
+                config=generation_config,
+            ),
+            timeout=_LLM_CALL_TIMEOUT_SECONDS,
         )
 
     def _extract_response_text(self, response: object) -> str | None:
