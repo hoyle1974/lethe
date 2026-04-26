@@ -150,10 +150,10 @@ if echo "$SEARCH_RESP" | jq -e '.detail' > /dev/null 2>&1; then
   exit 1
 fi
 
-echo "Search response: $(echo "$SEARCH_RESP" | jq '{count, results: [.results[]? | {uuid, node_type, content: .content[0:60]}]}')"
+echo "Search response: $(echo "$SEARCH_RESP" | jq '{count, nodes: [.nodes[]? | {uuid, node_type, content: .content[0:60]}]}')"
 echo ""
 
-SEED_IDS=$(echo "$SEARCH_RESP" | jq -r '[.results[].uuid] | @json')
+SEED_IDS=$(echo "$SEARCH_RESP" | jq -r '[.nodes[].uuid] | @json')
 
 if [ "$SEED_IDS" = "[]" ] || [ -z "$SEED_IDS" ]; then
   echo "No matching nodes found."

@@ -162,7 +162,7 @@ else
     exit 1
   fi
 
-  SEED_IDS=$(echo "$SEARCH_RESP" | jq -r '[.results[].uuid] | @json')
+  SEED_IDS=$(echo "$SEARCH_RESP" | jq -r '[.nodes[].uuid] | @json')
   if [ "$SEED_IDS" = "[]" ] || [ -z "$SEED_IDS" ]; then
     echo "No matching nodes found; nothing to summarize."
     exit 0
