@@ -33,16 +33,18 @@ echo "Streaming logs: $SERVICE_NAME (project=$PROJECT region=$REGION)"
 echo "Ctrl+C to stop."
 echo ""
 
+FORMAT="value(timestamp,firstof(textPayload,jsonPayload.message))"
+
 # Show recent history before handing off to the live tail
 echo "--- last $LINES lines ---"
 gcloud logging read "$LOG_FILTER" \
   --project="$PROJECT" \
   --limit="$LINES" \
   --order=asc \
-  --format="value(timestamp, textPayload)"
+  --format="$FORMAT"
 echo "--- live ---"
 
 exec gcloud beta logging tail "$LOG_FILTER" \
   --project="$PROJECT" \
   --buffer-window=2s \
-  --format="value(timestamp, textPayload)"
+  --format="$FORMAT"
