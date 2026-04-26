@@ -608,17 +608,39 @@ def test_backfill_uses_embed_batch(mock_embedder, mock_llm):
     assert lines == [], f"backfill must not call embedder.embed() directly; found: {lines}"
 
 
-def test_corpus_ingest_generates_corpus_id(mock_embedder, mock_llm):
-    """Corpus endpoint returns a corpus_id when none is provided."""
-    mock_doc_ref = AsyncMock()
-    mock_doc_ref.set = AsyncMock()
-    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
-    mock_doc_ref.update = AsyncMock()
+def _make_corpus_mock_db(mock_doc_ref=None):
+    """Return a MagicMock db suitable for corpus ingest tests.
+
+    Includes a properly mocked Firestore transaction so that
+    create_relationship_node (corpus→document edge) doesn't crash.
+    """
+    if mock_doc_ref is None:
+        mock_doc_ref = AsyncMock()
+        mock_doc_ref.set = AsyncMock()
+        mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+        mock_doc_ref.update = AsyncMock()
+
+    mock_transaction = MagicMock()
+    mock_transaction._begin = AsyncMock(return_value=None)
+    mock_transaction._commit = AsyncMock(return_value=[])
+    mock_transaction._rollback = AsyncMock()
+    mock_transaction._clean_up = MagicMock()
+    mock_transaction.set = MagicMock()
+    mock_transaction.update = MagicMock()
+    mock_transaction.in_progress = False
+
     mock_db = MagicMock()
     mock_db.collection.return_value.document.return_value = mock_doc_ref
     mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
         return_value=_async_iter([])
     )
+    mock_db.transaction.return_value = mock_transaction
+    return mock_db
+
+
+def test_corpus_ingest_generates_corpus_id(mock_embedder, mock_llm):
+    """Corpus endpoint returns a corpus_id when none is provided."""
+    mock_db = _make_corpus_mock_db()
     mock_llm._response = "status: none"
 
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
@@ -635,15 +657,7 @@ def test_corpus_ingest_generates_corpus_id(mock_embedder, mock_llm):
 
 def test_corpus_ingest_accepts_explicit_corpus_id(mock_embedder, mock_llm):
     """Provided corpus_id is preserved in the response."""
-    mock_doc_ref = AsyncMock()
-    mock_doc_ref.set = AsyncMock()
-    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
-    mock_doc_ref.update = AsyncMock()
-    mock_db = MagicMock()
-    mock_db.collection.return_value.document.return_value = mock_doc_ref
-    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
-        return_value=_async_iter([])
-    )
+    mock_db = _make_corpus_mock_db()
     mock_llm._response = "status: none"
 
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
@@ -660,15 +674,7 @@ def test_corpus_ingest_accepts_explicit_corpus_id(mock_embedder, mock_llm):
 
 def test_corpus_ingest_returns_document_ids(mock_embedder, mock_llm):
     """One document_id is returned per submitted document."""
-    mock_doc_ref = AsyncMock()
-    mock_doc_ref.set = AsyncMock()
-    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
-    mock_doc_ref.update = AsyncMock()
-    mock_db = MagicMock()
-    mock_db.collection.return_value.document.return_value = mock_doc_ref
-    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
-        return_value=_async_iter([])
-    )
+    mock_db = _make_corpus_mock_db()
     mock_llm._response = "status: none"
 
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
@@ -699,15 +705,7 @@ def test_corpus_ingest_rejects_empty_documents(mock_embedder, mock_llm):
 
 def test_corpus_ingest_response_contains_chunk_ids(mock_embedder, mock_llm):
     """Response includes a chunk_ids list with one entry per chunk created."""
-    mock_doc_ref = AsyncMock()
-    mock_doc_ref.set = AsyncMock()
-    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
-    mock_doc_ref.update = AsyncMock()
-    mock_db = MagicMock()
-    mock_db.collection.return_value.document.return_value = mock_doc_ref
-    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
-        return_value=_async_iter([])
-    )
+    mock_db = _make_corpus_mock_db()
     mock_llm._response = "status: none"
 
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
@@ -734,11 +732,7 @@ def test_corpus_ingest_chunk_nodes_use_chunk_type(mock_embedder, mock_llm):
     mock_doc_ref.set = capturing_set
     mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
     mock_doc_ref.update = AsyncMock()
-    mock_db = MagicMock()
-    mock_db.collection.return_value.document.return_value = mock_doc_ref
-    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
-        return_value=_async_iter([])
-    )
+    mock_db = _make_corpus_mock_db(mock_doc_ref)
     mock_llm._response = "status: none"
 
     client = _make_test_client(mock_embedder, mock_llm, mock_db)
@@ -762,15 +756,7 @@ def test_corpus_ingest_llm_called_twice_per_doc_not_per_chunk(mock_embedder):
             dispatch_calls.append(req)
             return "status: none"
 
-    mock_doc_ref = AsyncMock()
-    mock_doc_ref.set = AsyncMock()
-    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
-    mock_doc_ref.update = AsyncMock()
-    mock_db = MagicMock()
-    mock_db.collection.return_value.document.return_value = mock_doc_ref
-    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
-        return_value=_async_iter([])
-    )
+    mock_db = _make_corpus_mock_db()
 
     client = _make_test_client(mock_embedder, TrackingLLM(), mock_db)
     resp = client.post(
@@ -783,3 +769,31 @@ def test_corpus_ingest_llm_called_twice_per_doc_not_per_chunk(mock_embedder):
     assert resp.status_code == 201
     # Exactly 2 LLM calls per document: 1 for summarize_document + 1 for extract_triples(summary)
     assert len(dispatch_calls) == 2
+
+
+def test_corpus_ingest_response_contains_corpus_node_id(mock_embedder, mock_llm):
+    """Response includes a corpus_node_id and a corpus node is written with node_type='corpus'."""
+    written_node_types: list[str] = []
+
+    async def capturing_set(data, **kwargs):
+        if isinstance(data, dict) and "node_type" in data:
+            written_node_types.append(data["node_type"])
+
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = capturing_set
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+    mock_db = _make_corpus_mock_db(mock_doc_ref)
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus",
+        json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "corpus_node_id" in data, "response must include corpus_node_id"
+    assert isinstance(data["corpus_node_id"], str)
+    assert len(data["corpus_node_id"]) > 0
+    assert "corpus" in written_node_types, "a corpus node must be written to Firestore"

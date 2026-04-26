@@ -149,6 +149,7 @@ class CorpusIngestRequest(BaseModel):
 
 class CorpusIngestResponse(BaseModel):
     corpus_id: str
+    corpus_node_id: str = ""
     document_ids: list[str] = Field(default_factory=list)
     chunk_ids: list[str] = Field(default_factory=list)
     total_chunks: int = 0

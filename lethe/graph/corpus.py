@@ -10,12 +10,14 @@ from google.cloud import firestore
 from lethe.config import Config
 from lethe.constants import (
     CHUNK_NODE_WEIGHT,
+    CORPUS_NODE_WEIGHT,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_DOMAIN,
     DEFAULT_USER_ID,
     DOCUMENT_NODE_WEIGHT,
     EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     NODE_TYPE_CHUNK,
+    NODE_TYPE_CORPUS,
     NODE_TYPE_DOCUMENT,
 )
 from lethe.graph.canonical_map import CanonicalMap
@@ -70,6 +72,43 @@ async def _create_document_node(
     )
     log.info("corpus: created document node doc_id=%s filename=%r", doc_id, filename)
     return doc_id
+
+
+async def _create_corpus_node(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    config: Config,
+    corpus_id: str,
+    filenames: list[str],
+    user_id: str,
+    domain: str,
+    ts: str,
+) -> str:
+    node_id = str(uuid.uuid4())
+    files_summary = ", ".join(filenames) if filenames else "(no files)"
+    content = f"Corpus '{corpus_id}': {files_summary}"
+    vector = await embedder.embed(content, EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
+    metadata = json.dumps({"corpus_id": corpus_id, "file_count": len(filenames)})
+    await (
+        db.collection(config.lethe_collection)
+        .document(node_id)
+        .set(
+            {
+                "node_type": NODE_TYPE_CORPUS,
+                "content": content,
+                "domain": domain,
+                "weight": CORPUS_NODE_WEIGHT,
+                "metadata": metadata,
+                "embedding": Vector(vector),
+                "user_id": user_id,
+                "source": corpus_id,
+                "created_at": ts,
+                "updated_at": ts,
+            }
+        )
+    )
+    log.info("corpus: created corpus node corpus_node_id=%s corpus_id=%r", node_id, corpus_id)
+    return node_id
 
 
 async def _create_chunk_node(
@@ -274,6 +313,20 @@ async def run_corpus_ingest(
     seen_relationships: set[str] = set()
     total_chunks = 0
 
+    filenames = [doc.filename for doc in documents]
+    corpus_node_id = await _create_corpus_node(
+        db=db,
+        embedder=embedder,
+        config=config,
+        corpus_id=corpus_id,
+        filenames=filenames,
+        user_id=user_id,
+        domain=domain,
+        ts=ts,
+    )
+    seen_created.add(corpus_node_id)
+    all_nodes_created.append(corpus_node_id)
+
     total_docs = len(documents)
     for doc_idx, doc in enumerate(documents):
         log.info("corpus: [%d/%d] starting %r", doc_idx + 1, total_docs, doc.filename)
@@ -290,6 +343,24 @@ async def run_corpus_ingest(
             ts=ts,
         )
         document_ids.append(doc_id)
+
+        rel_id = await create_relationship_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            subject_id=corpus_node_id,
+            predicate="contains",
+            object_id=doc_id,
+            source_entry_id=corpus_node_id,
+            subject_content=f"Corpus '{corpus_id}'",
+            object_content=f"document {doc.filename}",
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+        if rel_id not in seen_relationships:
+            seen_relationships.add(rel_id)
+            all_relationships_created.append(rel_id)
 
         # One LLM summary per document → SPO extraction on summary only
         summary = await summarize_document(llm=llm, text=doc.text, filename=doc.filename)
@@ -385,6 +456,7 @@ async def run_corpus_ingest(
     )
     return CorpusIngestResponse(
         corpus_id=corpus_id,
+        corpus_node_id=corpus_node_id,
         document_ids=document_ids,
         chunk_ids=chunk_ids,
         total_chunks=total_chunks,
