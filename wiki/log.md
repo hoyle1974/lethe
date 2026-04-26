@@ -14,3 +14,5 @@ Append-only record of all wiki updates. Format: `YYYY-MM-DD: [page] description`
 2026-04-25: [algorithms] corpus.py now logs per-file start, chunk count, and per-chunk progress
 2026-04-25: [algorithms] §5 BFS updated — source_filter pre-filtering for namespace scoping
 2026-04-25: [api.md] Added source_filter field to POST /v1/graph/expand and /v1/graph/summarize
+2026-04-26: [algorithms] §9 corpus ingestion — added corpus hub node (node_type="corpus") as searchable anchor; contains edges to document nodes
+2026-04-26: [api.md] POST /v1/ingest/corpus response now includes corpus_node_id

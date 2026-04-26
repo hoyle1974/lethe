@@ -156,28 +156,34 @@ Entry point: `POST /v1/ingest/corpus`.
 
 Chunks are stored as vector-indexed `node_type="chunk"` nodes only — no SPO triple extraction per chunk. Triple extraction runs exactly once per document on a generated LLM summary. Code files additionally receive a deterministic structural edges pass with no LLM involvement.
 
-Steps for each document in the request:
+Steps:
 
-1. **Create document node** — embed first 10 000 chars, write to Firestore with `node_type="document"`, `weight=1.0`, `source=corpus_id`, `metadata={"filename": ..., "corpus_id": ...}`. Full original text stored in `content` field.
-2. **Summarize document** — `summarize_document(llm, text, filename)` → Gemini generates 3–5 entity-dense sentences capped at `DOCUMENT_SUMMARY_CHAR_LIMIT = 50 000` chars. Uses `lethe/prompts/document_summary.txt`. Max tokens: `LLM_MAX_TOKENS_DOCUMENT_SUMMARY = 512`.
-3. **SPO extraction on summary** — call `run_ingest(summary)` once per document. Creates one `node_type="log"` summary node + entity/relationship nodes from triples. Tagged `metadata={"is_summary": True, "document_id": ..., "filename": ...}`.
-4. **Chunk document** — `chunk_document(text, filename, chunk_size)` in `lethe/graph/chunk.py` dispatches to:
+1. **Create corpus node** — embed `"Corpus '{corpus_id}': {filenames}"`, write to Firestore with `node_type="corpus"`, `weight=1.0`, `source=corpus_id`. This is the searchable hub: querying "tell me about corpus X" returns this node; BFS from it reaches all documents and entities.
+
+Then, for each document:
+
+2. **Create document node** — embed first 10 000 chars, write to Firestore with `node_type="document"`, `weight=1.0`, `source=corpus_id`, `metadata={"filename": ..., "corpus_id": ...}`. Full original text stored in `content` field.
+3. **Add `contains` edge** — `corpus_node --[contains]--> document_node`. Structural, `llm=None`.
+4. **Summarize document** — `summarize_document(llm, text, filename)` → Gemini generates 3–5 entity-dense sentences capped at `DOCUMENT_SUMMARY_CHAR_LIMIT = 50 000` chars. Uses `lethe/prompts/document_summary.txt`. Max tokens: `LLM_MAX_TOKENS_DOCUMENT_SUMMARY = 512`.
+5. **SPO extraction on summary** — call `run_ingest(summary)` once per document. Creates one `node_type="log"` summary node + entity/relationship nodes from triples. Tagged `metadata={"is_summary": True, "document_id": ..., "filename": ...}`.
+6. **Chunk document** — `chunk_document(text, filename, chunk_size)` in `lethe/graph/chunk.py` dispatches to:
    - **Code** (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.go`, `.rs`, `.c`, `.cpp`, `.h`, `.cs`, `.rb`, `.swift`, `.kt`): splits on top-level `def`/`class`/`async def` lines; prepends file preamble (imports) to each chunk; falls back to prose if no top-level defs found. Oversized blocks (>chunk_size×2 words) are split as prose with preamble re-injected into every sub-chunk.
    - **Prose** (all other extensions): splits on `\n\n`, accumulates up to `chunk_size` words, carries 1 trailing paragraph as overlap into the next chunk.
-5. **Store chunk nodes** — each chunk written directly as `node_type="chunk"`, `weight=0.4`, vector-indexed. No LLM extraction. `metadata={"document_id": ..., "chunk_index": N, "corpus_id": ..., "filename": ...}`.
-6. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
+7. **Store chunk nodes** — each chunk written directly as `node_type="chunk"`, `weight=0.4`, vector-indexed. No LLM extraction. `metadata={"document_id": ..., "chunk_index": N, "corpus_id": ..., "filename": ...}`.
+8. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
    - `.py` files: stdlib `ast` parser extracts `(module, imports, dep)`, `(module, defines, fn)`, `(ClassName, has_method, fn)` triples.
    - Other code types: regex-based import extraction.
    - Entity node types: `module` for subjects/import targets, `function` for defines/has_method targets.
    - `llm=None` passed to `ensure_node` and `create_relationship_node` (no collision detection, no supersede check).
-7. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all documents.
+9. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all documents.
 
 ### Traceability chain
 
 ```
-document node  (node_type="document", content=full text, source=corpus_id)
-  └── summary log node  (node_type="log", metadata={"is_summary": True, "document_id": ...})
-        └── entity/relationship nodes  (source=corpus_id)
+corpus node  (node_type="corpus", content="Corpus 'id': file1.py, ...", source=corpus_id)
+  └── document node  (node_type="document", content=full text, source=corpus_id)  [via contains edge]
+        └── summary log node  (node_type="log", metadata={"is_summary": True, "document_id": ...})
+              └── entity/relationship nodes  (source=corpus_id)
 chunk nodes  (node_type="chunk", metadata={"document_id": ..., "chunk_index": N}, source=corpus_id)
 structural entity nodes  (node_type="module"|"function", source=corpus_id)  [code files only]
 structural edges  (predicate="imports"|"defines"|"has_method")  [code files only]
@@ -187,6 +193,8 @@ structural edges  (predicate="imports"|"defines"|"has_method")  [code files only
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
+| `NODE_TYPE_CORPUS` | `"corpus"` | Node type for the corpus hub node |
+| `CORPUS_NODE_WEIGHT` | `1.0` | Default weight for corpus hub node |
 | `NODE_TYPE_CHUNK` | `"chunk"` | Node type for raw chunk nodes |
 | `CHUNK_NODE_WEIGHT` | `0.4` | Default weight for chunk nodes |
 | `LLM_MAX_TOKENS_DOCUMENT_SUMMARY` | `512` | Max tokens for document summary |

@@ -76,6 +76,7 @@ same `corpus_id` appends to the existing corpus.
 ```json
 {
   "corpus_id": "uuid-or-caller-provided",
+  "corpus_node_id": "uuid-of-corpus-hub-node",
   "document_ids": ["doc-uuid-1", "doc-uuid-2"],
   "chunk_ids": ["chunk-uuid-1", "chunk-uuid-2", "..."],
   "total_chunks": 42,
@@ -84,6 +85,8 @@ same `corpus_id` appends to the existing corpus.
   "relationships_created": ["rel_xyz", "..."]
 }
 ```
+
+`corpus_node_id` — UUID of the `node_type="corpus"` hub node. Its content is `"Corpus '{corpus_id}': file1.py, file2.md"` — searching by corpus name finds this node, and BFS expansion from it reaches all documents and entities.
 
 `chunk_ids` — UUIDs of `node_type="chunk"` nodes. Use for targeted vector search against raw source text.
 
