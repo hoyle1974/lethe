@@ -1,3 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from lethe.graph.ensure_node import (
     _looks_like_entity_doc_id,
     normalized_predicate,
@@ -169,3 +173,121 @@ def test_core_node_type_not_in_types():
     import lethe.types as m
 
     assert not hasattr(m, "CoreNodeType"), "CoreNodeType still exists in lethe.types; delete it"
+
+
+# ---------------------------------------------------------------------------
+# NEW: predicate — append_predicate integration
+# ---------------------------------------------------------------------------
+
+
+def _make_firestore_mocks():
+    """Return (mock_db, mock_ref) wired for a minimal create_relationship_node call."""
+    mock_snap = MagicMock()
+    mock_snap.exists = False
+
+    mock_ref = AsyncMock()
+    mock_ref.get = AsyncMock(return_value=mock_snap)
+
+    async def _empty():
+        return
+        yield
+
+    mock_query = MagicMock()
+    mock_query.where.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.stream.return_value = _empty()
+
+    mock_col = MagicMock()
+    mock_col.document.return_value = mock_ref
+    mock_col.where.return_value = mock_query
+
+    mock_transaction = MagicMock()
+    mock_transaction.set = MagicMock()
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value = mock_col
+    mock_db.transaction.return_value = mock_transaction
+
+    return mock_db, mock_ref
+
+
+def _passthrough_transactional(fn):
+    """Drop-in replacement for @firestore.async_transactional in tests."""
+
+    async def wrapper(transaction):
+        return await fn(transaction)
+
+    return wrapper
+
+
+@pytest.mark.asyncio
+async def test_create_relationship_node_calls_append_predicate_for_new_prefix():
+    """NEW: predicate must call append_predicate to register it in the canonical map."""
+    from lethe.graph.ensure_node import create_relationship_node
+    from tests.conftest import MockEmbedder
+
+    subject_id = "entity_" + "a" * 40
+    object_id = "entity_" + "b" * 40
+    mock_db, _ = _make_firestore_mocks()
+
+    mock_config = MagicMock()
+    mock_config.lethe_relationships_collection = "relationships"
+
+    with (
+        patch(
+            "google.cloud.firestore.async_transactional",
+            side_effect=_passthrough_transactional,
+        ),
+        patch("lethe.graph.ensure_node.append_predicate", new_callable=AsyncMock) as mock_append,
+    ):
+        await create_relationship_node(
+            db=mock_db,
+            embedder=MockEmbedder(),
+            config=mock_config,
+            subject_id=subject_id,
+            predicate="NEW:mentors",
+            object_id=object_id,
+            source_entry_id="log_1",
+            subject_content="Alice",
+            object_content="Bob",
+            timestamp="2026-01-01T00:00:00Z",
+        )
+
+    mock_append.assert_called_once_with(mock_db, "mentors")
+
+
+@pytest.mark.asyncio
+async def test_create_relationship_node_no_append_for_known_predicate():
+    """Known predicates must NOT call append_predicate."""
+    from lethe.graph.ensure_node import create_relationship_node
+    from tests.conftest import MockEmbedder
+
+    subject_id = "entity_" + "a" * 40
+    object_id = "entity_" + "b" * 40
+    mock_db, _ = _make_firestore_mocks()
+
+    mock_config = MagicMock()
+    mock_config.lethe_relationships_collection = "relationships"
+
+    with (
+        patch(
+            "google.cloud.firestore.async_transactional",
+            side_effect=_passthrough_transactional,
+        ),
+        patch("lethe.graph.ensure_node.append_predicate", new_callable=AsyncMock) as mock_append,
+    ):
+        await create_relationship_node(
+            db=mock_db,
+            embedder=MockEmbedder(),
+            config=mock_config,
+            subject_id=subject_id,
+            predicate="works_at",
+            object_id=object_id,
+            source_entry_id="log_1",
+            subject_content="Alice",
+            object_content="Acme",
+            timestamp="2026-01-01T00:00:00Z",
+        )
+
+    mock_append.assert_not_called()

@@ -91,9 +91,9 @@ async def test_tombstone_relationship_no_error_when_doc_missing():
 
 
 @pytest.mark.asyncio
-async def test_evaluate_supersedes_finds_uuid_in_response():
+async def test_evaluate_supersedes_exact_uuid_match():
     uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    llm = MockLLM(response=f"Supersede {uid} because moved.")
+    llm = MockLLM(response=uid)
     out = await evaluate_relationship_supersedes(
         llm, "Alex lives_in NY", [(uid, "Alex lives_in SF")]
     )
@@ -107,3 +107,37 @@ async def test_evaluate_supersedes_returns_none_without_match():
         llm, "Alex likes pizza", [("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "Alex likes pasta")]
     )
     assert out is None
+
+
+@pytest.mark.asyncio
+async def test_evaluate_supersedes_rejects_substring_collision():
+    """LLM response containing a UUID as a substring (not exact) must not match."""
+    uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    llm = MockLLM(response=f"Supersede {uid} because moved.")
+    out = await evaluate_relationship_supersedes(
+        llm, "Alex lives_in NY", [(uid, "Alex lives_in SF")]
+    )
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_evaluate_supersedes_no_spurious_match_between_prefix_uuids():
+    """A shorter UUID must not match a longer one that contains it as a substring."""
+    uid_short = "rel_aabbcc"
+    uid_long = "rel_aabbccdd"
+    llm = MockLLM(response=uid_short)
+    out = await evaluate_relationship_supersedes(
+        llm, "new fact", [(uid_short, "old fact A"), (uid_long, "old fact B")]
+    )
+    assert out == uid_short
+
+
+@pytest.mark.asyncio
+async def test_tombstone_relationship_logs_warning_when_doc_missing(caplog):
+    import logging
+
+    doc_ref = _FakeDocRef(exists=False)
+    db = _FakeDB(doc_ref)
+    with caplog.at_level(logging.WARNING, logger="lethe.graph.contradiction"):
+        await tombstone_relationship(db, "relationships", "phantom-id")
+    assert any("phantom-id" in r.message for r in caplog.records)

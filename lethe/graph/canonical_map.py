@@ -73,4 +73,4 @@ async def seed_canonical_map(db: firestore.AsyncClient) -> None:
 
 async def append_predicate(db: firestore.AsyncClient, predicate: str) -> None:
     ref = db.collection(CONFIG_COLLECTION).document(CANONICAL_MAP_DOC)
-    await ref.update({"allowed_predicates": ArrayUnion([predicate])})
+    await ref.set({"allowed_predicates": ArrayUnion([predicate])}, merge=True)

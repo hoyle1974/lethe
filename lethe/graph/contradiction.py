@@ -40,9 +40,8 @@ async def evaluate_relationship_supersedes(
         return None
     known = {uid.lower(): uid for uid, _ in existing_facts}
     response_lower = (text or "").lower().strip()
-    for uid_lower, uid_original in known.items():
-        if uid_lower in response_lower:
-            return uid_original
+    if response_lower in known:
+        return known[response_lower]
     return None
 
 
@@ -54,5 +53,6 @@ async def tombstone_relationship(
     ref = db.collection(collection_name).document(old_rel_id)
     snap = await ref.get()
     if not snap.exists:
+        log.warning("tombstone_relationship: document not found: %s", old_rel_id)
         return
     await ref.update({"weight": 0.0})
