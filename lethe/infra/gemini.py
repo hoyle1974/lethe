@@ -7,6 +7,7 @@ from lethe.infra.llm import LLMRequest
 from lethe.types import EmbeddingTaskType
 
 _LLM_CALL_TIMEOUT_SECONDS = 180
+_EMBED_CALL_TIMEOUT_SECONDS = 60
 
 try:
     from google import genai
@@ -36,10 +37,13 @@ class GeminiEmbedder:
         text: str,
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     ) -> list[float]:
-        result = await self._client.aio.models.embed_content(
-            model=self._model_name,
-            contents=text,
-            config=genai_types.EmbedContentConfig(task_type=task_type),
+        result = await asyncio.wait_for(
+            self._client.aio.models.embed_content(
+                model=self._model_name,
+                contents=text,
+                config=genai_types.EmbedContentConfig(task_type=task_type),
+            ),
+            timeout=_EMBED_CALL_TIMEOUT_SECONDS,
         )
         return list(result.embeddings[0].values)
 
@@ -48,10 +52,13 @@ class GeminiEmbedder:
         texts: list[str],
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     ) -> list[list[float]]:
-        result = await self._client.aio.models.embed_content(
-            model=self._model_name,
-            contents=texts,
-            config=genai_types.EmbedContentConfig(task_type=task_type),
+        result = await asyncio.wait_for(
+            self._client.aio.models.embed_content(
+                model=self._model_name,
+                contents=texts,
+                config=genai_types.EmbedContentConfig(task_type=task_type),
+            ),
+            timeout=_EMBED_CALL_TIMEOUT_SECONDS,
         )
         return [list(e.values) for e in result.embeddings]
 
