@@ -21,12 +21,43 @@ from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import Vector
 from lethe.infra.llm import LLMDispatcher
 
+
+class StatsResponse(BaseModel):
+    nodes_total: int
+    nodes_by_type: dict[str, int]
+    edges_total: int
+    edges_by_predicate: dict[str, int]
+
+
 router = APIRouter()
 
 
 @router.get("/v1/health")
 async def health():
     return {"status": "ok"}
+
+
+@router.get("/v1/stats", response_model=StatsResponse)
+async def stats(
+    db: firestore.AsyncClient = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> StatsResponse:
+    nodes_by_type: dict[str, int] = {}
+    async for doc in db.collection(config.lethe_collection).stream():
+        nt = (doc.to_dict() or {}).get("node_type", "unknown")
+        nodes_by_type[nt] = nodes_by_type.get(nt, 0) + 1
+
+    edges_by_predicate: dict[str, int] = {}
+    async for doc in db.collection(config.lethe_relationships_collection).stream():
+        pred = (doc.to_dict() or {}).get("predicate", "unknown")
+        edges_by_predicate[pred] = edges_by_predicate.get(pred, 0) + 1
+
+    return StatsResponse(
+        nodes_total=sum(nodes_by_type.values()),
+        nodes_by_type=nodes_by_type,
+        edges_total=sum(edges_by_predicate.values()),
+        edges_by_predicate=edges_by_predicate,
+    )
 
 
 @router.get("/v1/node-types")

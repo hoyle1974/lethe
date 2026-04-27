@@ -1,12 +1,13 @@
 """Tests for idempotent corpus ingestion helpers."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from lethe.graph.corpus import (
     _content_hash,
+    _DocPipelineResult,
     _get_existing_chunk_ids,
     _tombstone_chunks_for_document,
     _upsert_corpus_node,
@@ -359,3 +360,81 @@ async def test_run_corpus_ingest_skips_unchanged_doc():
     assert result.chunk_ids == ["chunk-reused"]
     assert result.total_chunks == 1
     assert stable_document_id(corpus_id, "notes.txt") in result.document_ids
+
+
+# ---------------------------------------------------------------------------
+# run_corpus_ingest — one pipeline failure must not abort other documents
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_corpus_ingest_one_pipeline_failure_does_not_abort_others():
+    """An exception in one document pipeline must be logged and skipped; other
+    documents must still produce results and run_corpus_ingest must not raise."""
+    import httpx
+
+    corpus_id = "fault-isolation-test"
+    doc_good = DocumentItem(text="good document", filename="good.py")
+    doc_bad = DocumentItem(text="bad document", filename="bad.py")
+
+    good_doc_id = stable_document_id(corpus_id, "good.py")
+    corpus_node_id = stable_corpus_node_id(corpus_id)
+
+    good_result = _DocPipelineResult(
+        doc_id=good_doc_id,
+        chunk_ids=["chunk-good"],
+        nodes_created=["node-g1"],
+        nodes_updated=[],
+        relationships_created=["rel-g1"],
+    )
+
+    call_order: list[str] = []
+
+    async def fake_pipeline(**kwargs):
+        doc = kwargs["doc"]
+        call_order.append(doc.filename)
+        if doc.filename == "bad.py":
+            raise httpx.ConnectError("transient network failure")
+        return good_result
+
+    corpus_snap = MagicMock()
+    corpus_snap.exists = False
+    corpus_ref = AsyncMock()
+    corpus_ref.get = AsyncMock(return_value=corpus_snap)
+    corpus_ref.set = AsyncMock()
+    corpus_ref.update = AsyncMock()
+
+    doc_snap = MagicMock()
+    doc_snap.exists = False
+    doc_ref = AsyncMock()
+    doc_ref.get = AsyncMock(return_value=doc_snap)
+    doc_ref.set = AsyncMock()
+    doc_ref.update = AsyncMock()
+
+    def _doc_ref_for(doc_id):
+        if doc_id == corpus_node_id:
+            return corpus_ref
+        return doc_ref
+
+    mock_col = MagicMock()
+    mock_col.document = MagicMock(side_effect=_doc_ref_for)
+    mock_db = MagicMock()
+    mock_db.collection = MagicMock(return_value=mock_col)
+    mock_config = MagicMock()
+    mock_config.lethe_collection = "nodes"
+
+    with patch("lethe.graph.corpus._process_document_pipeline", side_effect=fake_pipeline):
+        result = await run_corpus_ingest(
+            db=mock_db,
+            embedder=_MockEmbedder(),
+            llm=MagicMock(),
+            config=mock_config,
+            canonical_map=MagicMock(),
+            documents=[doc_bad, doc_good],
+            corpus_id=corpus_id,
+        )
+
+    assert set(call_order) == {"good.py", "bad.py"}, "both docs must be attempted"
+    assert good_doc_id in result.document_ids, "good doc must appear in output"
+    assert "chunk-good" in result.chunk_ids, "good doc chunks must be present"
+    assert "node-g1" in result.nodes_created, "good doc nodes must be present"

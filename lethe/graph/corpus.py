@@ -754,7 +754,7 @@ async def run_corpus_ingest(
     # at most CORPUS_LLM_CONCURRENCY generate_content requests are in flight
     # at any time. Embedding and Firestore writes are unrestricted.
     rate_limited_llm = _RateLimitedLLM(llm, asyncio.Semaphore(CORPUS_LLM_CONCURRENCY))
-    doc_results: list[_DocPipelineResult] = await asyncio.gather(
+    raw_results: list[_DocPipelineResult | BaseException] = await asyncio.gather(
         *[
             _process_document_pipeline(
                 db=db,
@@ -778,10 +778,11 @@ async def run_corpus_ingest(
             for doc_idx, (doc, (doc_id, is_new, is_changed)) in enumerate(
                 zip(documents, doc_classifications)
             )
-        ]
+        ],
+        return_exceptions=True,
     )
 
-    # Aggregate results with global deduplication.
+    # Aggregate results with global deduplication; skip failed pipelines.
     document_ids: list[str] = []
     chunk_ids: list[str] = []
     all_nodes_created: list[str] = []
@@ -798,7 +799,10 @@ async def run_corpus_ingest(
         seen_updated.add(corpus_node_id)
         all_nodes_updated.append(corpus_node_id)
 
-    for result in doc_results:
+    for result in raw_results:
+        if isinstance(result, BaseException):
+            log.error("corpus: document pipeline failed (skipped): %r", result)
+            continue
         document_ids.append(result.doc_id)
         chunk_ids.extend(result.chunk_ids)
         for n in result.nodes_created:

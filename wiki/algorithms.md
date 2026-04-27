@@ -235,6 +235,10 @@ Each document node receives a `pipeline_done_at` ISO timestamp written at the ex
 
 The `POST /v1/ingest/corpus` 202 response includes `ingest_ts` (the timestamp at request time). The status endpoint `POST /v1/ingest/corpus/{corpus_id}/status` batch-fetches all document nodes via `db.get_all()` and counts those where `pipeline_done_at >= ingest_ts`. The script polls this endpoint and shows a spinner progress display.
 
+### Fault isolation in Phase 2
+
+Phase 2 uses `asyncio.gather(..., return_exceptions=True)`. A transient error in one document's pipeline (e.g. `httpx.ConnectError` to the Gemini API) is logged and skipped; all other documents proceed normally and are included in the result. Without this, a single network blip would abort the entire corpus ingest.
+
 ### Constants
 
 | Constant | Value | Purpose |

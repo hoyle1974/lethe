@@ -914,3 +914,42 @@ def test_corpus_document_pipeline_writes_structural_bridge_edges(mock_embedder):
     assert "mentioned_in" in predicates_written, (
         f"expected mentioned_in edge; predicates written: {predicates_written}"
     )
+
+
+def test_stats_returns_node_and_edge_counts(mock_embedder, mock_llm):
+    """GET /v1/stats returns totals and per-type/predicate breakdowns."""
+
+    def _make_node(node_type):
+        m = MagicMock()
+        m.to_dict = MagicMock(return_value={"node_type": node_type})
+        return m
+
+    def _make_edge(predicate):
+        m = MagicMock()
+        m.to_dict = MagicMock(return_value={"predicate": predicate})
+        return m
+
+    nodes = [_make_node("person"), _make_node("person"), _make_node("organization")]
+    edges = [_make_edge("works_at"), _make_edge("works_at"), _make_edge("knows")]
+
+    def _col(name):
+        col = MagicMock()
+        if name == "nodes":
+            col.stream = MagicMock(return_value=_async_iter(nodes))
+        else:
+            col.stream = MagicMock(return_value=_async_iter(edges))
+        return col
+
+    mock_db = MagicMock()
+    mock_db.collection = MagicMock(side_effect=_col)
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.get("/v1/stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["nodes_total"] == 3
+    assert data["nodes_by_type"]["person"] == 2
+    assert data["nodes_by_type"]["organization"] == 1
+    assert data["edges_total"] == 3
+    assert data["edges_by_predicate"]["works_at"] == 2
+    assert data["edges_by_predicate"]["knows"] == 1

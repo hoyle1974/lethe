@@ -27,6 +27,22 @@ Vocabulary is seeded from Firestore at startup and extended at runtime by new-pr
 
 ---
 
+## GET /v1/stats
+Database-wide statistics. Scans both Firestore collections and returns counts.
+No query parameters.
+**Response**:
+```json
+{
+  "nodes_total": 1234,
+  "nodes_by_type": { "person": 120, "log": 800, "chunk": 200, "corpus": 1, "document": 37, ... },
+  "edges_total": 567,
+  "edges_by_predicate": { "works_at": 45, "has_chunk": 200, "next_chunk": 180, ... }
+}
+```
+Used by `scripts/stats.sh`, which also calls `GET /v1/node-types` and renders a combined terminal report.
+
+---
+
 ## POST /v1/ingest
 Ingest free text. Stores log node + extracts SPO triples → entity nodes + edges.
 Always returns 200. Extraction errors are logged and skipped, not surfaced.

@@ -29,3 +29,5 @@ Append-only record of all wiki updates. Format: `YYYY-MM-DD: [page] description`
 2026-04-26: [algorithms] Corpus structural bridge: has_summary (document→log), next_chunk (chunk chain), mentioned_in (entity→chunk via regex); entity fetch via db.get_all(); traceability chain updated
 2026-04-26: [algorithms] Corpus completion signalling: pipeline_done_at field written per document; ingest_ts in 202 response; status endpoint POST /v1/ingest/corpus/{corpus_id}/status; corpus.sh polls with spinner
 2026-04-27: [api.md, architecture] fix: status endpoint used snap.get() which raises KeyError for absent fields; changed to snap.to_dict().get(); corpus.sh poll loop now checks HTTP status before parsing JSON to survive transient 500s
+2026-04-27: [algorithms] Phase 2 gather uses return_exceptions=True — one document pipeline failure is logged and skipped instead of aborting the full corpus ingest
+2026-04-27: [api.md] Added GET /v1/stats endpoint — node counts by type, edge counts by predicate; added scripts/stats.sh which renders a combined terminal report including canonical vocabulary
