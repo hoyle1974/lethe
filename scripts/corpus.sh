@@ -186,18 +186,27 @@ HTTP_STATUS=$(curl -s -o /tmp/lethe_corpus_response.json -w "%{http_code}" \
   --data-binary @- <<< "$PAYLOAD")
 RESPONSE=$(cat /tmp/lethe_corpus_response.json)
 
-if [ "$HTTP_STATUS" != "201" ]; then
+if [ "$HTTP_STATUS" != "201" ] && [ "$HTTP_STATUS" != "202" ]; then
   echo "Error: server returned HTTP $HTTP_STATUS"
   echo "$RESPONSE"
   exit 1
 fi
 
-echo "$RESPONSE" | jq '{
-  corpus_id,
-  corpus_node_id,
-  document_ids_count: (.document_ids | length),
-  total_chunks,
-  nodes_created: (.nodes_created | length),
-  nodes_updated: (.nodes_updated | length),
-  relationships_created: (.relationships_created | length)
-}'
+if [ "$HTTP_STATUS" = "202" ]; then
+  echo "Accepted (processing in background)"
+  echo "$RESPONSE" | jq '{
+    corpus_id,
+    corpus_node_id,
+    document_ids_count: (.document_ids | length)
+  }'
+else
+  echo "$RESPONSE" | jq '{
+    corpus_id,
+    corpus_node_id,
+    document_ids_count: (.document_ids | length),
+    total_chunks,
+    nodes_created: (.nodes_created | length),
+    nodes_updated: (.nodes_updated | length),
+    relationships_created: (.relationships_created | length)
+  }'
+fi
