@@ -5,6 +5,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -85,6 +86,11 @@ async def _upsert_document_node(
             existing_meta = {}
         if existing_meta.get("content_hash") == content_hash:
             log.info("corpus: skip unchanged doc_id=%s filename=%r", doc_id, filename)
+            await (
+                db.collection(config.lethe_collection)
+                .document(doc_id)
+                .update({"pipeline_done_at": ts})
+            )
             return doc_id, False, False
 
         vector = await embedder.embed(text[:10_000], EMBEDDING_TASK_RETRIEVAL_DOCUMENT)
@@ -495,6 +501,7 @@ async def _process_document_pipeline(
             seen_relationships.add(rel_id)
             relationships_created.append(rel_id)
 
+    summary_entities: list[tuple[str, str]] = []
     summary = await summarize_document(llm=llm, text=doc.text, filename=doc.filename)
     log.info(
         "corpus: [%d/%d] summary=%d chars filename=%r",
@@ -531,6 +538,39 @@ async def _process_document_pipeline(
             relationships_created,
         )
 
+        # Task 1: document → summary-log structural edge
+        hs_rel_id = await create_relationship_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            subject_id=doc_id,
+            predicate="has_summary",
+            object_id=summary_result.entry_uuid,
+            source_entry_id=doc_id,
+            subject_content=f"document {doc.filename}",
+            object_content="summary log",
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+        if hs_rel_id not in seen_relationships:
+            seen_relationships.add(hs_rel_id)
+            relationships_created.append(hs_rel_id)
+
+        # Task 2: fetch entity nodes produced by summary ingest for lexical linking
+        entity_ids = list(set(summary_result.nodes_created + summary_result.nodes_updated))
+        if entity_ids:
+            refs = [db.collection(config.lethe_collection).document(eid) for eid in entity_ids]
+            try:
+                async for snap in db.get_all(refs):
+                    data = snap.to_dict() or {}
+                    if data.get("node_type") != "log":
+                        content = data.get("content") or ""
+                        if content:
+                            summary_entities.append((snap.id, content))
+            except Exception:
+                log.warning("corpus: get_all for entity linking failed doc_id=%s", doc_id)
+
     chunks = chunk_document(doc.text, doc.filename, chunk_size)
     log.info(
         "corpus: [%d/%d] %r → %d chunks (doc_id=%s)",
@@ -541,6 +581,7 @@ async def _process_document_pipeline(
         doc_id,
     )
     chunk_ids: list[str] = []
+    prev_chunk_id: str | None = None
     for i, chunk_text in enumerate(chunks):
         chunk_id = await _create_chunk_node(
             db=db,
@@ -556,6 +597,73 @@ async def _process_document_pipeline(
             ts=ts,
         )
         chunk_ids.append(chunk_id)
+
+        # Task 3a: chain consecutive chunks
+        if prev_chunk_id is not None:
+            nc_rel_id = await create_relationship_node(
+                db=db,
+                embedder=embedder,
+                config=config,
+                subject_id=prev_chunk_id,
+                predicate="next_chunk",
+                object_id=chunk_id,
+                source_entry_id=doc_id,
+                subject_content=f"chunk {i - 1} of {doc.filename}",
+                object_content=f"chunk {i} of {doc.filename}",
+                timestamp=ts,
+                user_id=user_id,
+                llm=None,
+            )
+            if nc_rel_id not in seen_relationships:
+                seen_relationships.add(nc_rel_id)
+                relationships_created.append(nc_rel_id)
+
+        # Task 3b: link entities whose name appears in this chunk
+        for entity_id, entity_content in summary_entities:
+            if re.search(rf"\b{re.escape(entity_content)}\b", chunk_text, re.IGNORECASE):
+                mi_rel_id = await create_relationship_node(
+                    db=db,
+                    embedder=embedder,
+                    config=config,
+                    subject_id=entity_id,
+                    predicate="mentioned_in",
+                    object_id=chunk_id,
+                    source_entry_id=doc_id,
+                    subject_content=entity_content,
+                    object_content=f"chunk {i} of {doc.filename}",
+                    timestamp=ts,
+                    user_id=user_id,
+                    llm=None,
+                )
+                if mi_rel_id not in seen_relationships:
+                    seen_relationships.add(mi_rel_id)
+                    relationships_created.append(mi_rel_id)
+
+        prev_chunk_id = chunk_id
+
+    has_chunk_rel_ids: list[str] = await asyncio.gather(
+        *[
+            create_relationship_node(
+                db=db,
+                embedder=embedder,
+                config=config,
+                subject_id=doc_id,
+                predicate="has_chunk",
+                object_id=chunk_id,
+                source_entry_id=doc_id,
+                subject_content=f"document {doc.filename}",
+                object_content=f"chunk {i} of {doc.filename}",
+                timestamp=ts,
+                user_id=user_id,
+                llm=None,
+            )
+            for i, chunk_id in enumerate(chunk_ids)
+        ]
+    )
+    for rel_id in has_chunk_rel_ids:
+        if rel_id not in seen_relationships:
+            seen_relationships.add(rel_id)
+            relationships_created.append(rel_id)
 
     if detect_chunk_strategy(doc.filename) == "code":
         struct_created, struct_updated, struct_rels = await _ingest_structural_edges(
@@ -582,6 +690,8 @@ async def _process_document_pipeline(
             if r not in seen_relationships:
                 seen_relationships.add(r)
                 relationships_created.append(r)
+
+    await db.collection(config.lethe_collection).document(doc_id).update({"pipeline_done_at": ts})
 
     return _DocPipelineResult(
         doc_id=doc_id,

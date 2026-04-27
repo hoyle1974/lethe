@@ -825,3 +825,92 @@ def test_corpus_document_endpoint_processes_single_doc(mock_embedder, mock_llm):
     assert data["doc_id"] == "doc_def456"
     assert "chunk_ids" in data
     assert "nodes_created" in data
+
+
+def test_corpus_document_pipeline_writes_structural_bridge_edges(mock_embedder):
+    """Pipeline writes has_summary, next_chunk, and mentioned_in structural edges.
+
+    has_summary:  document  → summary log node  (bridges SPO graph to corpus graph)
+    next_chunk:   chunk_n   → chunk_n+1         (requires 2+ chunks; chunk_size=2 forces it)
+    mentioned_in: entity    → chunk             (entity name found via regex in chunk text)
+    """
+    predicates_written: list[str] = []
+
+    mock_doc_ref = AsyncMock()
+    mock_doc_ref.set = AsyncMock()
+    mock_doc_ref.get = AsyncMock(return_value=MagicMock(exists=False))
+    mock_doc_ref.update = AsyncMock()
+
+    mock_transaction = MagicMock()
+    mock_transaction._begin = AsyncMock(return_value=None)
+    mock_transaction._commit = AsyncMock(return_value=[])
+    mock_transaction._rollback = AsyncMock()
+    mock_transaction._clean_up = MagicMock()
+    mock_transaction.update = MagicMock()
+    mock_transaction.in_progress = False
+
+    def _capture_txn_set(ref, data):
+        if isinstance(data, dict) and "predicate" in data:
+            predicates_written.append(data["predicate"])
+
+    mock_transaction.set = _capture_txn_set
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value = mock_doc_ref
+    mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream = AsyncMock(  # noqa: E501
+        return_value=_async_iter([])
+    )
+    mock_db.transaction.return_value = mock_transaction
+
+    # db.get_all() returns a snapshot with content "Alice" so lexical matching fires
+    alice_snap = MagicMock()
+    alice_snap.id = "entity_alice_fake_uuid"
+    alice_snap.to_dict.return_value = {"node_type": "person", "content": "Alice"}
+
+    async def _mock_get_all(refs):
+        yield alice_snap
+
+    mock_db.get_all = _mock_get_all
+
+    # LLM call 1 (summarize_document) → summary; call 2 (extract_triples) → Alice triple
+    _responses = [
+        "Alice is the CEO of Acme.",
+        "Status: found\nTriples:\nAlice | works_at | Acme | person | organization",
+    ]
+    _call_idx = 0
+
+    class _SequentialLLM:
+        async def dispatch(self, req) -> str:
+            nonlocal _call_idx
+            r = _responses[min(_call_idx, len(_responses) - 1)]
+            _call_idx += 1
+            return r
+
+    client = _make_test_client(mock_embedder, _SequentialLLM(), mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus/document",
+        json={
+            "corpus_id": "my-corpus",
+            "corpus_node_id": "corpus_abc123",
+            "doc_id": "doc_def456",
+            "doc": {
+                "text": "Alice works here.\n\nAlice is the CEO of Acme.",
+                "filename": "notes.txt",
+            },
+            "is_new": True,
+            "ts": "2026-01-01T00:00:00+00:00",
+            "doc_idx": 0,
+            "total_docs": 1,
+            "chunk_size": 2,
+        },
+    )
+    assert resp.status_code == 201
+    assert "has_summary" in predicates_written, (
+        f"expected has_summary edge; predicates written: {predicates_written}"
+    )
+    assert "next_chunk" in predicates_written, (
+        f"expected next_chunk edge; predicates written: {predicates_written}"
+    )
+    assert "mentioned_in" in predicates_written, (
+        f"expected mentioned_in edge; predicates written: {predicates_written}"
+    )

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
 from lethe.constants import (
+    CHUNK_SNIPPET_LENGTH,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_DOMAIN,
     DEFAULT_RELATIONSHIP_WEIGHT,
@@ -100,8 +102,12 @@ class GraphExpandResponse(BaseModel):
         source_logs: dict[str, list[Node]] | None = None,
     ) -> str:
         lines = ["## Knowledge Graph\n"]
+        chunk_nodes: list[Node] = []
         for uuid, node in self.nodes.items():
             if node.node_type == "log":
+                continue
+            if node.node_type == "chunk":
+                chunk_nodes.append(node)
                 continue
             marker = " [SEED]" if uuid in seed_ids else ""
             lines.append(
@@ -126,6 +132,18 @@ class GraphExpandResponse(BaseModel):
             subj_label = subj.content[:40] if subj else edge.subject_uuid[:8]
             obj_label = obj.content[:40] if obj else edge.object_uuid[:8]
             lines.append(f"- {subj_label} --[{edge.predicate}]--> {obj_label}")
+        if chunk_nodes:
+            lines.append("\n## Source Chunks\n")
+            for chunk in chunk_nodes:
+                try:
+                    meta = json.loads(chunk.metadata or "{}")
+                except (TypeError, ValueError):
+                    meta = {}
+                filename = meta.get("filename", "")
+                idx = meta.get("chunk_index", "")
+                header = f"[{filename} chunk {idx}]" if filename else "[chunk]"
+                snippet = (chunk.content or "")[:CHUNK_SNIPPET_LENGTH]
+                lines.append(f'{header} "{snippet}"')
         return "\n".join(lines)
 
 
@@ -156,6 +174,20 @@ class CorpusIngestResponse(BaseModel):
     nodes_created: list[str] = Field(default_factory=list)
     nodes_updated: list[str] = Field(default_factory=list)
     relationships_created: list[str] = Field(default_factory=list)
+    ingest_ts: str = ""
+
+
+class CorpusStatusRequest(BaseModel):
+    document_ids: list[str]
+    user_id: str = DEFAULT_USER_ID
+    ingest_ts: str = ""
+
+
+class CorpusStatusResponse(BaseModel):
+    corpus_id: str
+    total: int
+    completed: int
+    is_complete: bool
 
 
 class CorpusDocumentRequest(BaseModel):

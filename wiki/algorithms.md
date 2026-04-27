@@ -61,6 +61,7 @@ decayed_score = base_score * exp(-ln(2) * age_days / half_life_days)
 Half-lives:
 - Log nodes: 30 days
 - Entity nodes: 365 days
+- Corpus/document/chunk nodes: **∞ (no decay)** — reference content stays relevant until explicitly re-ingested; `updated_at` is bumped on re-ingest
 - Edges: 90 days
 
 Combined with observation reinforcement: nodes referenced by more log entries score higher.
@@ -122,6 +123,12 @@ Result is passed to `GraphExpandResponse.to_markdown()` as `source_logs`. The ma
 - **person** `abc12345` [SEED]: Jack Strohm (metadata={})
   [source] "Started building Lethe last month, it's a graph-based memory system..."
   [source] "Working on the summarization pipeline today..."
+```
+
+Chunk nodes (reachable via `has_chunk` edges) are excluded from the `## Knowledge Graph` node list to avoid flooding it with raw text. Instead they appear in a dedicated `## Source Chunks` section with up to `CHUNK_SNIPPET_LENGTH = 800` chars each:
+
+```
+[lethe/graph/corpus.py chunk 3] "async def _create_chunk_node(..."
 ```
 
 This gives the final summarization LLM both the structured fact (compressed, precise) and the original prose (expressive, contextual).
@@ -192,24 +199,41 @@ Then, for each document (Phase 2, runs up to 5 concurrently):
    - **Code** (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.go`, `.rs`, `.c`, `.cpp`, `.h`, `.cs`, `.rb`, `.swift`, `.kt`): splits on top-level `def`/`class`/`async def` lines; prepends file preamble (imports) to each chunk; falls back to prose if no top-level defs found. Oversized blocks (>chunk_size×2 words) are split as prose with preamble re-injected into every sub-chunk.
    - **Prose** (all other extensions): splits on `\n\n`, accumulates up to `chunk_size` words, carries 1 trailing paragraph as overlap into the next chunk.
 8. **Store chunk nodes** — each chunk written as `node_type="chunk"`, `weight=0.4`, vector-indexed. `document_id` stored both in JSON metadata and as a top-level field. No LLM extraction.
-9. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
-   - `.py` files: stdlib `ast` parser extracts `(module, imports, dep)`, `(module, defines, fn)`, `(ClassName, has_method, fn)` triples.
-   - Other code types: regex-based import extraction.
-   - Entity node types: `module` for subjects/import targets, `function` for defines/has_method targets.
-   - `llm=None` passed to `ensure_node` and `create_relationship_node` (no collision detection, no supersede check).
-10. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all documents.
+9. **`has_summary` edge** — immediately after merging the summary `run_ingest` result, writes `document --[has_summary]--> summary_log_node`. Bridges the corpus graph to the SPO graph so BFS can walk from a document into its extracted entities.
+10. **Entity fetch for lexical linking** — collects unique entity UUIDs from `summary_result.nodes_created + nodes_updated`, fetches them via `db.get_all()`, and builds `summary_entities = [(uuid, content), ...]` (non-log nodes only) for use in the chunk loop.
+11. **Chunk loop** — for each chunk (sequential):
+    - **`next_chunk` edge**: if a previous chunk exists, writes `chunk_{i-1} --[next_chunk]--> chunk_i`. Allows sliding-window context retrieval.
+    - **`mentioned_in` edges**: for every entity in `summary_entities` whose name matches `\b{name}\b` (case-insensitive) in the chunk text, writes `entity --[mentioned_in]--> chunk`. Bridges entity nodes to raw passages.
+12. **`has_chunk` edges** — after all chunk nodes are created, concurrent `asyncio.gather` writes one `document --[has_chunk]--> chunk` edge per chunk. These are structural (`llm=None`), enabling BFS traversal from the document to its raw content.
+13. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
+    - `.py` files: stdlib `ast` parser extracts `(module, imports, dep)`, `(module, defines, fn)`, `(ClassName, has_method, fn)` triples.
+    - Other code types: regex-based import extraction.
+    - Entity node types: `module` for subjects/import targets, `function` for defines/has_method targets.
+    - `llm=None` passed to `ensure_node` and `create_relationship_node` (no collision detection, no supersede check).
+15. **Aggregate** — set-based deduplication of `nodes_created`, `nodes_updated`, `relationships_created` across all documents.
 
 ### Traceability chain
 
 ```
 corpus node  (node_type="corpus", id=stable_corpus_node_id, source=corpus_id)
-  └── document node  (node_type="document", id=stable_document_id, metadata={content_hash}, source=corpus_id)  [via contains edge]
-        └── summary log node  (node_type="log", metadata={"is_summary": True, "document_id": ...})
-              └── entity/relationship nodes  (source=corpus_id)
-chunk nodes  (node_type="chunk", document_id=<top-level field>, metadata={"document_id": ..., "chunk_index": N}, source=corpus_id)
+  └── document node  (node_type="document", id=stable_document_id, metadata={content_hash})  [via contains]
+        ├── summary log node  (node_type="log", metadata={"is_summary": True})  [via has_summary]
+        │     └── entity/relationship nodes  (source=corpus_id)
+        │           └── chunk nodes  (via mentioned_in edges, lexical match)
+        └── chunk nodes  (node_type="chunk", source=corpus_id)  [via has_chunk]
+              └── next chunk  (via next_chunk edges, sequential)
 structural entity nodes  (node_type="module"|"function", source=corpus_id)  [code files only]
 structural edges  (predicate="imports"|"defines"|"has_method")  [code files only]
 ```
+
+### Completion signalling
+
+Each document node receives a `pipeline_done_at` ISO timestamp written at the exact moment its work is done:
+
+- **Unchanged docs** (`content_hash` matches): written by `_upsert_document_node` immediately on skip.
+- **New/changed docs**: written at the end of `_process_document_pipeline` after all edges are created.
+
+The `POST /v1/ingest/corpus` 202 response includes `ingest_ts` (the timestamp at request time). The status endpoint `POST /v1/ingest/corpus/{corpus_id}/status` batch-fetches all document nodes via `db.get_all()` and counts those where `pipeline_done_at >= ingest_ts`. The script polls this endpoint and shows a spinner progress display.
 
 ### Constants
 

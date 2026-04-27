@@ -192,21 +192,55 @@ if [ "$HTTP_STATUS" != "201" ] && [ "$HTTP_STATUS" != "202" ]; then
   exit 1
 fi
 
-if [ "$HTTP_STATUS" = "202" ]; then
-  echo "Accepted (processing in background)"
-  echo "$RESPONSE" | jq '{
-    corpus_id,
-    corpus_node_id,
-    document_ids_count: (.document_ids | length)
-  }'
+CORPUS_ID_RESP=$(echo "$RESPONSE" | jq -r '.corpus_id')
+DOC_IDS_JSON=$(echo "$RESPONSE" | jq '.document_ids')
+DOC_COUNT=$(echo "$RESPONSE" | jq '.document_ids | length')
+INGEST_TS=$(echo "$RESPONSE" | jq -r '.ingest_ts // ""')
+
+echo "corpus_id:  $CORPUS_ID_RESP"
+echo "documents:  $DOC_COUNT"
+
+# Poll for completion when we have document IDs and an ingest timestamp
+if [ "$DOC_COUNT" -gt 0 ] && [ -n "$INGEST_TS" ] && [ "$INGEST_TS" != "null" ]; then
+  MAX_WAIT=600
+  INTERVAL=5
+  ELAPSED=0
+  SPIN=('|' '/' '-' '\')
+  SI=0
+
+  while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+    STATUS_RESP=$(curl -s -X POST \
+      "$BASE_URL/v1/ingest/corpus/$CORPUS_ID_RESP/status" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $AUTH_TOKEN" \
+      --data-binary @- <<< "{
+        \"document_ids\": $DOC_IDS_JSON,
+        \"user_id\": \"$USER_ID\",
+        \"ingest_ts\": \"$INGEST_TS\"
+      }")
+
+    COMPLETED=$(echo "$STATUS_RESP" | jq -r '.completed // 0')
+    IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.is_complete // false')
+
+    printf "\r  %s Processing: %d/%d documents  (%ds)" \
+      "${SPIN[$SI]}" "$COMPLETED" "$DOC_COUNT" "$ELAPSED"
+    SI=$(( (SI + 1) % 4 ))
+
+    if [ "$IS_COMPLETE" = "true" ]; then
+      printf "\n\nIngestion complete (%ds)\n" "$ELAPSED"
+      # Terminal bell + macOS voice notification (silent-fail if unavailable)
+      printf '\a'
+      osascript -e 'say "Corpus ingestion complete"' 2>/dev/null || true
+      break
+    fi
+
+    sleep "$INTERVAL"
+    ELAPSED=$(( ELAPSED + INTERVAL ))
+  done
+
+  if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+    printf "\nWarning: timed out after %ds — processing may still be ongoing.\n" "$MAX_WAIT"
+  fi
 else
-  echo "$RESPONSE" | jq '{
-    corpus_id,
-    corpus_node_id,
-    document_ids_count: (.document_ids | length),
-    total_chunks,
-    nodes_created: (.nodes_created | length),
-    nodes_updated: (.nodes_updated | length),
-    relationships_created: (.relationships_created | length)
-  }'
+  echo "No document IDs or ingest timestamp in response; skipping progress poll."
 fi

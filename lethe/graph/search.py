@@ -13,6 +13,9 @@ from lethe.constants import (
     EDGE_HALF_LIFE_DAYS,
     EMBEDDING_TASK_RETRIEVAL_QUERY,
     LOG_NODE_HALF_LIFE_DAYS,
+    NODE_TYPE_CHUNK,
+    NODE_TYPE_CORPUS,
+    NODE_TYPE_DOCUMENT,
     NODE_TYPE_LOG,
     STRUCTURED_NODE_HALF_LIFE_DAYS,
 )
@@ -44,6 +47,8 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 def half_life_days_for_node_type(node_type: str) -> float:
     if node_type == NODE_TYPE_LOG:
         return LOG_NODE_HALF_LIFE_DAYS
+    if node_type in (NODE_TYPE_CORPUS, NODE_TYPE_DOCUMENT, NODE_TYPE_CHUNK):
+        return math.inf  # corpus content never fades; re-ingest resets updated_at
     return STRUCTURED_NODE_HALF_LIFE_DAYS
 
 

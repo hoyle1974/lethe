@@ -26,6 +26,8 @@ from lethe.models.node import (
     CorpusDocumentResponse,
     CorpusIngestRequest,
     CorpusIngestResponse,
+    CorpusStatusRequest,
+    CorpusStatusResponse,
     IngestRequest,
     IngestResponse,
 )
@@ -151,6 +153,7 @@ async def ingest_corpus(
     canonical_map: CanonicalMap = Depends(get_canonical_map),
 ) -> CorpusIngestResponse:
     corpus_id = req.corpus_id or str(uuid.uuid4())
+    ingest_ts = datetime.now(timezone.utc).isoformat()
     corpus_node_id = stable_corpus_node_id(corpus_id)
     document_ids = [stable_document_id(corpus_id, doc.filename) for doc in req.documents]
 
@@ -182,6 +185,7 @@ async def ingest_corpus(
         corpus_id=corpus_id,
         corpus_node_id=corpus_node_id,
         document_ids=document_ids,
+        ingest_ts=ingest_ts,
     )
 
 
@@ -208,4 +212,35 @@ async def ingest_corpus_document(
         nodes_created=result.nodes_created,
         nodes_updated=result.nodes_updated,
         relationships_created=result.relationships_created,
+    )
+
+
+@router.post(
+    "/v1/ingest/corpus/{corpus_id}/status",
+    response_model=CorpusStatusResponse,
+    status_code=200,
+)
+async def corpus_ingest_status(
+    corpus_id: str,
+    req: CorpusStatusRequest,
+    db: firestore.AsyncClient = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> CorpusStatusResponse:
+    """Return how many documents in this ingest run have finished their pipeline."""
+    if not req.document_ids:
+        return CorpusStatusResponse(corpus_id=corpus_id, total=0, completed=0, is_complete=True)
+
+    refs = [db.collection(config.lethe_collection).document(doc_id) for doc_id in req.document_ids]
+    completed = 0
+    async for snap in db.get_all(refs):
+        done_at = snap.get("pipeline_done_at") if snap.exists else None
+        if done_at and (not req.ingest_ts or done_at >= req.ingest_ts):
+            completed += 1
+
+    total = len(req.document_ids)
+    return CorpusStatusResponse(
+        corpus_id=corpus_id,
+        total=total,
+        completed=completed,
+        is_complete=completed >= total,
     )

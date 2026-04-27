@@ -130,7 +130,10 @@ async def test_upsert_document_node_unchanged_skips():
     assert is_new is False
     assert is_changed is False
     mock_doc_ref.set.assert_not_awaited()
-    mock_doc_ref.update.assert_not_awaited()
+    # unchanged docs get a pipeline_done_at stamp — one update call expected
+    mock_doc_ref.update.assert_awaited_once()
+    call_data = mock_doc_ref.update.call_args[0][0]
+    assert "pipeline_done_at" in call_data
 
 
 @pytest.mark.asyncio
