@@ -134,16 +134,20 @@ fi
 AUTH_TOKEN=$(gcloud auth print-identity-token)
 
 # Build documents array
+# Use repo-relative paths (not basenames) so files with the same name in
+# different directories get distinct document IDs (e.g. routers/search.py
+# vs graph/search.py would otherwise collide and produce the same node ID).
 DOCS_JSON="[]"
 for filepath in "${FILES[@]}"; do
-  filename=$(basename "$filepath")
+  # Strip leading ./ for clean relative paths; fall back to basename.
+  rel="${filepath#./}"
   if [ ! -s "$filepath" ]; then
-    echo "Skipping empty file: $filename" >&2
+    echo "Skipping empty file: $rel" >&2
     continue
   fi
   file_content=$(jq -Rs '.' < "$filepath")
   DOCS_JSON=$(echo "$DOCS_JSON" | jq \
-    --arg filename "$filename" \
+    --arg filename "$rel" \
     --argjson text "$file_content" \
     '. + [{"text": $text, "filename": $filename}]')
 done

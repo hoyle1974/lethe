@@ -230,14 +230,18 @@ async def corpus_ingest_status(
     if not req.document_ids:
         return CorpusStatusResponse(corpus_id=corpus_id, total=0, completed=0, is_complete=True)
 
-    refs = [db.collection(config.lethe_collection).document(doc_id) for doc_id in req.document_ids]
+    # Deduplicate: same-basename files produce the same stable_document_id; counting
+    # duplicates inflates total while get_all deduplicates, causing is_complete to
+    # never be true.
+    unique_ids = list(dict.fromkeys(req.document_ids))
+    refs = [db.collection(config.lethe_collection).document(doc_id) for doc_id in unique_ids]
     completed = 0
     async for snap in db.get_all(refs):
         done_at = (snap.to_dict() or {}).get("pipeline_done_at") if snap.exists else None
         if done_at and (not req.ingest_ts or done_at >= req.ingest_ts):
             completed += 1
 
-    total = len(req.document_ids)
+    total = len(unique_ids)
     return CorpusStatusResponse(
         corpus_id=corpus_id,
         total=total,
