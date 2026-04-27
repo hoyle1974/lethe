@@ -209,8 +209,8 @@ if [ "$DOC_COUNT" -gt 0 ] && [ -n "$INGEST_TS" ] && [ "$INGEST_TS" != "null" ]; 
   SI=0
 
   while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
-    STATUS_RESP=$(curl -s -X POST \
-      "$BASE_URL/v1/ingest/corpus/$CORPUS_ID_RESP/status" \
+    STATUS_RESP=$(curl -s -o /tmp/lethe_status_response.json -w "%{http_code}" \
+      -X POST "$BASE_URL/v1/ingest/corpus/$CORPUS_ID_RESP/status" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $AUTH_TOKEN" \
       --data-binary @- <<< "{
@@ -219,8 +219,12 @@ if [ "$DOC_COUNT" -gt 0 ] && [ -n "$INGEST_TS" ] && [ "$INGEST_TS" != "null" ]; 
         \"ingest_ts\": \"$INGEST_TS\"
       }")
 
-    COMPLETED=$(echo "$STATUS_RESP" | jq -r '.completed // 0')
-    IS_COMPLETE=$(echo "$STATUS_RESP" | jq -r '.is_complete // false')
+    COMPLETED=0
+    IS_COMPLETE=false
+    if [ "$STATUS_RESP" = "200" ]; then
+      COMPLETED=$(jq -r '.completed // 0' /tmp/lethe_status_response.json 2>/dev/null || echo 0)
+      IS_COMPLETE=$(jq -r '.is_complete // false' /tmp/lethe_status_response.json 2>/dev/null || echo false)
+    fi
 
     printf "\r  %s Processing: %d/%d documents  (%ds)" \
       "${SPIN[$SI]}" "$COMPLETED" "$DOC_COUNT" "$ELAPSED"

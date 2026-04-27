@@ -233,7 +233,7 @@ async def corpus_ingest_status(
     refs = [db.collection(config.lethe_collection).document(doc_id) for doc_id in req.document_ids]
     completed = 0
     async for snap in db.get_all(refs):
-        done_at = snap.get("pipeline_done_at") if snap.exists else None
+        done_at = (snap.to_dict() or {}).get("pipeline_done_at") if snap.exists else None
         if done_at and (not req.ingest_ts or done_at >= req.ingest_ts):
             completed += 1
 
