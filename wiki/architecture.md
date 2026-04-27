@@ -31,6 +31,7 @@
 | `LETHE_SIMILARITY_THRESHOLD` | `0.25` | Semantic search cosine threshold |
 | `LETHE_ENTITY_THRESHOLD` | `0.15` | Entity dedup cosine threshold |
 | `LETHE_REGION` | `us-central1` | Vertex AI region |
+| `LETHE_SERVICE_URL` | `""` | Cloud Run service URL — enables fan-out corpus processing |
 
 ## Startup Sequence (`lethe/main.py` lifespan)
 1. Instantiate `Config` (reads env)
@@ -45,7 +46,7 @@
 | Module | Responsibilities |
 |--------|-----------------|
 | `lethe/routers/admin.py` | GET /v1/health, GET /v1/node-types, POST /v1/admin/consolidate, POST /v1/admin/backfill |
-| `lethe/routers/ingest.py` | POST /v1/ingest, POST /v1/ingest/corpus |
+| `lethe/routers/ingest.py` | POST /v1/ingest, POST /v1/ingest/corpus (202), POST /v1/ingest/corpus/document |
 | `lethe/routers/search.py` | POST /v1/search |
 | `lethe/routers/graph.py` | POST /v1/graph/expand, POST /v1/graph/summarize |
 | `lethe/routers/nodes.py` | GET /v1/nodes/{uuid}, GET /v1/nodes |
@@ -63,16 +64,22 @@ POST /v1/ingest
 
 ## Data Flow (Corpus Ingest)
 ```
-POST /v1/ingest/corpus
-  → router calls run_corpus_ingest() [lethe/graph/corpus.py]
-    → Phase 1 (parallel): upsert corpus node + classify all documents (content_hash check)
-    → Phase 2 (parallel, max 3 concurrent LLM): for each new/changed document:
-        → tombstone old chunks (if changed)
-        → summarize_document() via Gemini
-        → run_ingest(summary) → entity + relationship nodes
-        → chunk_document() → store chunk nodes (no LLM)
-        → _ingest_structural_edges() (code files only, no LLM)
-  → return CorpusIngestResponse
+POST /v1/ingest/corpus  →  202 Accepted immediately (deterministic IDs pre-computed)
+  ↓ background task
+  [fan-out mode: LETHE_SERVICE_URL set]
+    → run_corpus_setup(): Phase 1 — upsert corpus node + classify docs (content_hash check)
+    → fanout_corpus_documents(): one HTTPS call per new/changed doc to self
+        → Cloud Run auto-scales; each call → POST /v1/ingest/corpus/document
+
+  [in-process mode: LETHE_SERVICE_URL unset]
+    → run_corpus_ingest(): Phase 1 + Phase 2 on same instance (max 3 concurrent LLM)
+
+POST /v1/ingest/corpus/document  →  201 (fan-out target, one Cloud Run invocation per doc)
+    → tombstone old chunks (if changed)
+    → summarize_document() via Gemini
+    → run_ingest(summary) → entity + relationship nodes
+    → chunk_document() → store chunk nodes (no LLM)
+    → _ingest_structural_edges() (code files only, no LLM)
 ```
 
 ## Data Flow (Search)

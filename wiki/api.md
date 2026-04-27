@@ -54,12 +54,21 @@ Always returns 200. Extraction errors are logged and skipped, not surfaced.
 
 ## POST /v1/ingest/corpus
 Ingest a collection of related documents (e.g. a codebase) as a single corpus
-using the hub-and-spoke model. Each document gets one LLM summary → SPO extraction
-pass (not per chunk). Raw chunks are stored as vector-indexed `chunk` nodes (no triple
-extraction). Code files (`.py`, `.js`, `.ts`, etc.) additionally get deterministic
-structural edges (imports/defines/has_method) via stdlib `ast` — no LLM for code
-structure. All nodes and edges are tagged `source=corpus_id`. Re-submitting with the
-same `corpus_id` appends to the existing corpus.
+using the hub-and-spoke model. **Returns 202 immediately** — document processing
+happens asynchronously. The response contains deterministic IDs (computed from
+`corpus_id` + filenames) that are valid for immediate use in BFS/search queries;
+`chunk_ids`, `nodes_created`, etc. are empty in the 202 response.
+
+Each document gets one LLM summary → SPO extraction pass (not per chunk). Raw
+chunks are stored as vector-indexed `chunk` nodes (no triple extraction). Code
+files (`.py`, `.js`, `.ts`, etc.) additionally get deterministic structural edges
+(imports/defines/has_method) via stdlib `ast` — no LLM for code structure. All
+nodes and edges are tagged `source=corpus_id`. Re-submitting with the same
+`corpus_id` appends to the existing corpus.
+
+**Processing mode** (controlled by `LETHE_SERVICE_URL` env var):
+- **Fan-out** (recommended, `LETHE_SERVICE_URL` set): background task runs Phase 1 (fast corpus + document node upserts), then fans out one authenticated HTTPS call per new/changed document to `POST /v1/ingest/corpus/document` on the same service. Each call is handled by an independent Cloud Run instance, so any number of documents can be ingested in parallel with no single-request timeout risk.
+- **In-process** (`LETHE_SERVICE_URL` unset): entire pipeline runs as a background task on the same instance (suitable for local dev and small corpora).
 
 **Request** (`CorpusIngestRequest`):
 | Field | Type | Required | Default | Notes |
@@ -72,23 +81,55 @@ same `corpus_id` appends to the existing corpus.
 
 `filename` controls chunking strategy: `.py`/`.js`/`.ts`/etc → code (function/class splits); everything else → prose (paragraph splits).
 
-**Response** (`CorpusIngestResponse`):
+**Response** (`CorpusIngestResponse`) — `202 Accepted`:
 ```json
 {
   "corpus_id": "uuid-or-caller-provided",
-  "corpus_node_id": "uuid-of-corpus-hub-node",
-  "document_ids": ["doc-uuid-1", "doc-uuid-2"],
-  "chunk_ids": ["chunk-uuid-1", "chunk-uuid-2", "..."],
-  "total_chunks": 42,
+  "corpus_node_id": "deterministic-corpus-hub-id",
+  "document_ids": ["deterministic-doc-id-1", "deterministic-doc-id-2"],
+  "chunk_ids": [],
+  "total_chunks": 0,
+  "nodes_created": [],
+  "nodes_updated": [],
+  "relationships_created": []
+}
+```
+
+`corpus_node_id` and `document_ids` are deterministic (SHA-1 of corpus_id + filename) and immediately valid for BFS expansion and search even before background processing completes.
+
+`chunk_ids`, `nodes_created`, etc. are always `[]`/`0` in the 202 response — they are populated in the background.
+
+---
+
+## POST /v1/ingest/corpus/document
+Internal fan-out endpoint. Called by `POST /v1/ingest/corpus` (fan-out mode) to
+process one document per Cloud Run invocation.
+
+**Request** (`CorpusDocumentRequest`):
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `corpus_id` | string | yes | Parent corpus |
+| `corpus_node_id` | string | yes | Hub node ID |
+| `doc_id` | string | yes | Pre-computed stable document node ID |
+| `doc` | DocumentItem | yes | `{ "text": "...", "filename": "..." }` |
+| `is_new` | bool | yes | True if document was just created in Phase 1 |
+| `user_id` | string | no | `"global"` |
+| `domain` | string | no | `"general"` |
+| `chunk_size` | int | no | `600` |
+| `ts` | string | yes | ISO-8601 timestamp from Phase 1 |
+| `doc_idx` | int | yes | 0-based index for logging |
+| `total_docs` | int | yes | Total document count for logging |
+
+**Response** (`CorpusDocumentResponse`) — `201 Created`:
+```json
+{
+  "doc_id": "doc_...",
+  "chunk_ids": ["chunk-uuid-1", "..."],
   "nodes_created": ["entity_abc", "..."],
   "nodes_updated": [],
   "relationships_created": ["rel_xyz", "..."]
 }
 ```
-
-`corpus_node_id` — UUID of the `node_type="corpus"` hub node. Its content is `"Corpus '{corpus_id}': file1.py, file2.md"` — searching by corpus name finds this node, and BFS expansion from it reaches all documents and entities.
-
-`chunk_ids` — UUIDs of `node_type="chunk"` nodes. Use for targeted vector search against raw source text.
 
 ---
 

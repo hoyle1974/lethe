@@ -8,6 +8,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+import httpx
 from google.cloud import firestore
 
 from lethe.config import Config
@@ -37,7 +38,12 @@ from lethe.graph.ingest import run_ingest
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import FieldFilter, Vector
 from lethe.infra.llm import LLMDispatcher
-from lethe.models.node import CorpusIngestResponse, DocumentItem, IngestResponse
+from lethe.models.node import (
+    CorpusDocumentRequest,
+    CorpusIngestResponse,
+    DocumentItem,
+    IngestResponse,
+)
 
 log = logging.getLogger(__name__)
 
@@ -717,3 +723,124 @@ async def run_corpus_ingest(
         nodes_updated=all_nodes_updated,
         relationships_created=all_relationships_created,
     )
+
+
+# ---------------------------------------------------------------------------
+# Fan-out support: Phase 1 setup + single-document pipeline + Cloud Run calls
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class CorpusSetup:
+    corpus_node_id: str
+    corpus_is_new: bool
+    doc_classifications: list[tuple[str, bool, bool]]  # (doc_id, is_new, is_changed)
+
+
+async def run_corpus_setup(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    config: Config,
+    corpus_id: str,
+    documents: list[DocumentItem],
+    user_id: str,
+    domain: str,
+    ts: str,
+) -> CorpusSetup:
+    """Phase 1: upsert corpus hub node + classify all documents. No LLM calls."""
+    filenames = [d.filename for d in documents]
+    corpus_result, *doc_results = await asyncio.gather(
+        _upsert_corpus_node(db, embedder, config, corpus_id, filenames, user_id, domain, ts),
+        *[
+            _upsert_document_node(
+                db, embedder, config, d.text, d.filename, corpus_id, user_id, domain, ts
+            )
+            for d in documents
+        ],
+    )
+    return CorpusSetup(
+        corpus_node_id=corpus_result[0],
+        corpus_is_new=corpus_result[1],
+        doc_classifications=list(doc_results),
+    )
+
+
+async def run_single_document_pipeline(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    llm: LLMDispatcher,
+    config: Config,
+    canonical_map: CanonicalMap,
+    req: CorpusDocumentRequest,
+) -> _DocPipelineResult:
+    """Process one document through the full pipeline (used by the fan-out endpoint)."""
+    return await _process_document_pipeline(
+        db=db,
+        embedder=embedder,
+        llm=llm,
+        config=config,
+        canonical_map=canonical_map,
+        doc=req.doc,
+        doc_id=req.doc_id,
+        is_new=req.is_new,
+        is_changed=True,
+        corpus_id=req.corpus_id,
+        corpus_node_id=req.corpus_node_id,
+        user_id=req.user_id,
+        domain=req.domain,
+        chunk_size=req.chunk_size,
+        ts=req.ts,
+        doc_idx=req.doc_idx,
+        total_docs=req.total_docs,
+    )
+
+
+async def _get_identity_token(audience: str) -> str:
+    """Fetch a Cloud Run identity token from the GCE metadata server."""
+    url = (
+        "http://metadata.google.internal/computeMetadata/v1"
+        f"/instance/service-accounts/default/identity?audience={audience}"
+    )
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, headers={"Metadata-Flavor": "Google"}, timeout=10.0)
+        resp.raise_for_status()
+        return resp.text.strip()
+
+
+async def fanout_corpus_documents(
+    service_url: str,
+    doc_requests: list[CorpusDocumentRequest],
+) -> None:
+    """Fire one authenticated HTTPS call per document to the service's own document endpoint."""
+    if not doc_requests:
+        return
+
+    try:
+        token = await _get_identity_token(service_url)
+        auth_header = {"Authorization": f"Bearer {token}"}
+    except Exception:
+        log.warning("corpus: metadata server unavailable, fan-out calls will be unauthenticated")
+        auth_header = {}
+
+    endpoint = f"{service_url.rstrip('/')}/v1/ingest/corpus/document"
+    headers = {"Content-Type": "application/json", **auth_header}
+
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            client.post(endpoint, content=req.model_dump_json(), headers=headers, timeout=600.0)
+            for req in doc_requests
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for req, result in zip(doc_requests, results):
+        if isinstance(result, Exception):
+            log.error("corpus: fan-out failed filename=%r err=%s", req.doc.filename, result)
+        elif result.status_code not in (200, 201, 202):
+            log.error(
+                "corpus: fan-out bad status filename=%r status=%d body=%s",
+                req.doc.filename,
+                result.status_code,
+                result.text[:200],
+            )
+        else:
+            log.info("corpus: fan-out complete filename=%r", req.doc.filename)

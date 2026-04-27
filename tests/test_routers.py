@@ -648,7 +648,7 @@ def test_corpus_ingest_generates_corpus_id(mock_embedder, mock_llm):
         "/v1/ingest/corpus",
         json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     data = resp.json()
     assert "corpus_id" in data
     assert isinstance(data["corpus_id"], str)
@@ -668,12 +668,13 @@ def test_corpus_ingest_accepts_explicit_corpus_id(mock_embedder, mock_llm):
             "documents": [{"text": "Bob runs engineering.", "filename": "notes.txt"}],
         },
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     assert resp.json()["corpus_id"] == "my-corpus-abc"
 
 
 def test_corpus_ingest_returns_document_ids(mock_embedder, mock_llm):
-    """One document_id is returned per submitted document."""
+    """One document_id is returned per submitted document. chunk_ids/total_chunks are 0 in the
+    immediate 202 response — they are populated by the background pipeline."""
     mock_db = _make_corpus_mock_db()
     mock_llm._response = "status: none"
 
@@ -687,10 +688,12 @@ def test_corpus_ingest_returns_document_ids(mock_embedder, mock_llm):
             ]
         },
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     data = resp.json()
     assert len(data["document_ids"]) == 2
-    assert data["total_chunks"] >= 2
+    # chunk_ids and total_chunks are empty/0 in the immediate response (written async)
+    assert data["total_chunks"] == 0
+    assert data["chunk_ids"] == []
 
 
 def test_corpus_ingest_rejects_empty_documents(mock_embedder, mock_llm):
@@ -703,8 +706,8 @@ def test_corpus_ingest_rejects_empty_documents(mock_embedder, mock_llm):
     assert resp.status_code == 422
 
 
-def test_corpus_ingest_response_contains_chunk_ids(mock_embedder, mock_llm):
-    """Response includes a chunk_ids list with one entry per chunk created."""
+def test_corpus_ingest_response_contains_chunk_ids_field(mock_embedder, mock_llm):
+    """Response always includes a chunk_ids field (empty list in the immediate 202)."""
     mock_db = _make_corpus_mock_db()
     mock_llm._response = "status: none"
 
@@ -713,15 +716,14 @@ def test_corpus_ingest_response_contains_chunk_ids(mock_embedder, mock_llm):
         "/v1/ingest/corpus",
         json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     data = resp.json()
     assert "chunk_ids" in data
     assert isinstance(data["chunk_ids"], list)
-    assert len(data["chunk_ids"]) >= 1
 
 
 def test_corpus_ingest_chunk_nodes_use_chunk_type(mock_embedder, mock_llm):
-    """Each chunk is stored as node_type='chunk', not 'log'."""
+    """Each chunk is stored as node_type='chunk'. Background task runs before TestClient returns."""
     written_node_types: list[str] = []
 
     async def capturing_set(data, **kwargs):
@@ -740,7 +742,7 @@ def test_corpus_ingest_chunk_nodes_use_chunk_type(mock_embedder, mock_llm):
         "/v1/ingest/corpus",
         json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     assert "chunk" in written_node_types
 
 
@@ -766,7 +768,7 @@ def test_corpus_ingest_llm_called_twice_per_doc_not_per_chunk(mock_embedder):
             "chunk_size": 2,
         },
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     # Exactly 2 LLM calls per document: 1 for summarize_document + 1 for extract_triples(summary)
     assert len(dispatch_calls) == 2
 
@@ -791,9 +793,35 @@ def test_corpus_ingest_response_contains_corpus_node_id(mock_embedder, mock_llm)
         "/v1/ingest/corpus",
         json={"documents": [{"text": "Alice works at Acme.", "filename": "notes.txt"}]},
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     data = resp.json()
     assert "corpus_node_id" in data, "response must include corpus_node_id"
     assert isinstance(data["corpus_node_id"], str)
     assert len(data["corpus_node_id"]) > 0
     assert "corpus" in written_node_types, "a corpus node must be written to Firestore"
+
+
+def test_corpus_document_endpoint_processes_single_doc(mock_embedder, mock_llm):
+    """Fan-out endpoint /v1/ingest/corpus/document processes one document and returns 201."""
+    mock_db = _make_corpus_mock_db()
+    mock_llm._response = "status: none"
+
+    client = _make_test_client(mock_embedder, mock_llm, mock_db)
+    resp = client.post(
+        "/v1/ingest/corpus/document",
+        json={
+            "corpus_id": "my-corpus",
+            "corpus_node_id": "corpus_abc123",
+            "doc_id": "doc_def456",
+            "doc": {"text": "Alice works at Acme Corp.", "filename": "notes.txt"},
+            "is_new": True,
+            "ts": "2026-01-01T00:00:00+00:00",
+            "doc_idx": 0,
+            "total_docs": 1,
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["doc_id"] == "doc_def456"
+    assert "chunk_ids" in data
+    assert "nodes_created" in data

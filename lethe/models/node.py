@@ -156,3 +156,27 @@ class CorpusIngestResponse(BaseModel):
     nodes_created: list[str] = Field(default_factory=list)
     nodes_updated: list[str] = Field(default_factory=list)
     relationships_created: list[str] = Field(default_factory=list)
+
+
+class CorpusDocumentRequest(BaseModel):
+    """Single-document processing request used by the fan-out endpoint."""
+
+    corpus_id: str
+    corpus_node_id: str
+    doc_id: str
+    doc: DocumentItem
+    is_new: bool
+    user_id: str = DEFAULT_USER_ID
+    domain: str = DEFAULT_DOMAIN
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    ts: str
+    doc_idx: int
+    total_docs: int
+
+
+class CorpusDocumentResponse(BaseModel):
+    doc_id: str
+    chunk_ids: list[str] = Field(default_factory=list)
+    nodes_created: list[str] = Field(default_factory=list)
+    nodes_updated: list[str] = Field(default_factory=list)
+    relationships_created: list[str] = Field(default_factory=list)

@@ -24,3 +24,4 @@ Append-only record of all wiki updates. Format: `YYYY-MM-DD: [page] description`
 2026-04-26: [algorithms] §2 extraction strategy updated — "key relationships only", cap 20 triples (changed from "extract all, cap 50" in f83af05)
 2026-04-26: [data-model] Added corpus, document, chunk node type variants with weights and stable ID helpers; canonical map description updated to mention predicate resolution gate; added corpus/chunk/predicate-resolution constants
 2026-04-26: [architecture] Router table: ingest.py now shows POST /v1/ingest/corpus; added corpus ingest data flow section
+2026-04-27: [api.md, architecture] Corpus ingest redesigned — returns 202 immediately; fan-out mode (LETHE_SERVICE_URL) spawns one Cloud Run call per document via POST /v1/ingest/corpus/document; in-process mode for local/small corpora
