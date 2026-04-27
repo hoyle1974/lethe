@@ -8,7 +8,7 @@ Steps executed for every `POST /v1/ingest`:
 2. **Extract triples** — call `extract_triples()` → Gemini with refinery prompt → parse `(status, [RefineryTriple])`
 3. **If no triples**: return early with just `entry_uuid`
 4. **For each triple**:
-   a. If `is_new_predicate`: normalize predicate, append to Firestore canonical map + in-memory list
+   a. If `is_new_predicate`: run predicate resolution gate (§10) — may redirect to an existing predicate; only appends to canonical map if confirmed novel
    b. `_resolve_term(subject)` + `_resolve_term(object)` — resolves SELF token, rejects placeholders, looks up internal IDs
    c. If either term resolves to None: drop triple, keep log entry
    d. `_get_or_create_entity_node()` for subject + object → returns `(existed: bool, Node)`
@@ -221,3 +221,30 @@ structural edges  (predicate="imports"|"defines"|"has_method")  [code files only
 | `LLM_MAX_TOKENS_DOCUMENT_SUMMARY` | `512` | Max tokens for document summary |
 | `DOCUMENT_SUMMARY_CHAR_LIMIT` | `50 000` | Max chars sent to summarizer |
 | `DEFAULT_CHUNK_SIZE` | `600` | Words per chunk (configurable per request) |
+
+---
+
+## 10. Predicate Resolution Gate (`lethe/graph/predicate_resolution.py`)
+
+Called from `_process_triple` in `ingest.py` whenever `triple.is_new_predicate` is True — before any write to the canonical map.
+
+**Purpose:** Prevent ontology drift by redirecting LLM-proposed predicates to semantically equivalent existing ones rather than appending indefinitely.
+
+**Flow:**
+
+1. If `existing` list is empty → return `proposed` immediately (no LLM call)
+2. Render `lethe/prompts/predicate_resolution.txt` (Jinja2) with `proposed`, `triple_subject`, `triple_object`, `existing_predicates`
+3. Dispatch LLM (`system_prompt=RESOLUTION_SYSTEM`, `user_prompt=rendered template`, `max_tokens=256`)
+4. Parse response:
+   - `EXISTING: <name>` → validate `name` is in the existing list; return it if so (hallucinated names fall back to `proposed`)
+   - `NEW: approved` → return `proposed`
+   - Empty or unrecognized → return `proposed`
+5. Any exception → return `proposed` (fail-open: ingestion never stalls)
+
+**Back in `_process_triple`:**
+- If resolver returned a different predicate than `triple.canonical_predicate` → use it, skip `append_predicate`, log redirect
+- If resolver returned `triple.canonical_predicate` unchanged → call `append_predicate(db, predicate)` + update in-memory `canonical_map.allowed_predicates`
+
+**Concurrency note:** `append_predicate` uses Firestore `ArrayUnion`, so concurrent calls for the same novel predicate are idempotent. The in-memory guard (`if predicate not in canonical_map.allowed_predicates`) prevents duplicate list entries within a single process.
+
+**Constants:** `LLM_MAX_TOKENS_PREDICATE_RESOLUTION = 256`

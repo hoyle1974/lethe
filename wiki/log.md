@@ -20,3 +20,4 @@ Append-only record of all wiki updates. Format: `YYYY-MM-DD: [page] description`
 2026-04-26: [architecture] GeminiLLM._generate wrapped in asyncio.wait_for(timeout=90s) to prevent hanging API calls
 2026-04-26: [algorithms] §9 corpus ingestion — two-phase parallel model: asyncio.gather for classify, gather+Semaphore(5) for LLM pipeline
 2026-04-26: [algorithms] §9 corpus ingestion — LLM throttling moved to _RateLimitedLLM wrapper (max 3 concurrent); all pipeline work runs fully parallel; timeout increased to 180s
+2026-04-26: [algorithms] Added §10 predicate resolution gate — LLM evaluation before new predicates enter canonical map; §1 step 4a updated to reference it
