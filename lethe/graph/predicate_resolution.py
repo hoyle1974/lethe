@@ -40,6 +40,12 @@ def _parse_response(text: str, existing: list[str], proposed: str) -> str:
     line = text.strip().splitlines()[0].strip() if text.strip() else ""
     if line.upper().startswith("EXISTING:"):
         candidate = line.split(":", 1)[1].strip().lower()
+        if not candidate:
+            log.warning(
+                "predicate_resolution: LLM returned empty existing predicate — using proposed %r",
+                proposed,
+            )
+            return proposed
         if candidate in existing:
             return candidate
         log.warning(

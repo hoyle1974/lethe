@@ -177,6 +177,9 @@ async def _process_triple(
         )
         is_still_new = predicate == triple.canonical_predicate
         if is_still_new:
+            # append_predicate uses Firestore ArrayUnion so concurrent calls for the
+            # same predicate are idempotent; the in-memory guard below prevents a
+            # duplicate list entry in the same process.
             await append_predicate(db, predicate)
             if predicate not in canonical_map.allowed_predicates:
                 canonical_map.allowed_predicates.append(predicate)
