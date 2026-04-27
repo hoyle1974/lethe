@@ -27,6 +27,7 @@ from lethe.graph.ensure_node import (
 )
 from lethe.graph.extraction import RefineryTriple, extract_triples
 from lethe.graph.ids import is_generated_id
+from lethe.graph.predicate_resolution import resolve_new_predicate
 from lethe.infra.embedder import Embedder
 from lethe.infra.fs_helpers import ArrayUnion, Vector
 from lethe.infra.llm import LLMDispatcher
@@ -167,9 +168,24 @@ async def _process_triple(
 ) -> str:
     predicate = triple.canonical_predicate
     if triple.is_new_predicate:
-        await append_predicate(db, predicate)
-        if predicate not in canonical_map.allowed_predicates:
-            canonical_map.allowed_predicates.append(predicate)
+        predicate = await resolve_new_predicate(
+            llm=llm,
+            proposed=predicate,
+            triple_subject=triple.subject,
+            triple_object=triple.object,
+            existing=canonical_map.allowed_predicates,
+        )
+        is_still_new = predicate == triple.canonical_predicate
+        if is_still_new:
+            await append_predicate(db, predicate)
+            if predicate not in canonical_map.allowed_predicates:
+                canonical_map.allowed_predicates.append(predicate)
+        else:
+            log.info(
+                "predicate_resolution: redirected %r → %r",
+                triple.canonical_predicate,
+                predicate,
+            )
 
     subj_resolved = await _resolve_term(db, config, triple.subject, triple.subject_type, user_id)
     obj_resolved = await _resolve_term(db, config, triple.object, triple.object_type, user_id)
