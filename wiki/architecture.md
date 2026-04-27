@@ -103,7 +103,7 @@ POST /v1/graph/expand
 
 ## Infra Layer (`lethe/infra/`)
 - `firestore.py` — create_firestore_client()
-- `gemini.py` — GeminiEmbedder, GeminiLLM (implement Embedder/LLMDispatcher protocols)
+- `gemini.py` — GeminiEmbedder, GeminiLLM (implement Embedder/LLMDispatcher protocols). Both have `asyncio.wait_for` timeouts (embed: 60s, LLM: 180s) with one retry on `TimeoutError` to handle transient TCP stalls. LLM calls pass `BLOCK_NONE` safety settings for all harm categories — code content can trip default thresholds.
 - `llm.py` — LLMDispatcher protocol + LLMRequest dataclass
 - `embedder.py` — Embedder protocol
 - `fs_helpers.py` — Firestore helpers: FieldFilter, Vector, ArrayUnion

@@ -119,8 +119,14 @@ class GeminiLLM:
                     finish_reason or "UNKNOWN",
                 )
             return "status: none\ntriples:\n"
+        except asyncio.TimeoutError:
+            log.warning(
+                "GeminiLLM.dispatch timed out after two attempts (%ds each)",
+                _LLM_CALL_TIMEOUT_SECONDS,
+            )
+            raise
         except Exception as e:
-            log.warning("GeminiLLM.dispatch generation failed (likely safety filter): %s", e)
+            log.warning("GeminiLLM.dispatch generation failed: %s", e)
             raise
 
     async def _generate(self, req: LLMRequest, max_tokens: int) -> object:
@@ -128,17 +134,41 @@ class GeminiLLM:
         if req.system_prompt:
             config_kwargs["system_instruction"] = req.system_prompt
         if genai_types is not None and hasattr(genai_types, "GenerateContentConfig"):
+            # Disable safety filters — code content (function names, imports, etc.)
+            # can trip default thresholds; all ingested content is developer-controlled.
+            if hasattr(genai_types, "SafetySetting") and hasattr(genai_types, "HarmBlockThreshold"):
+                config_kwargs["safety_settings"] = [
+                    genai_types.SafetySetting(
+                        category=cat,
+                        threshold=genai_types.HarmBlockThreshold.BLOCK_NONE,
+                    )
+                    for cat in [
+                        "HARM_CATEGORY_HARASSMENT",
+                        "HARM_CATEGORY_HATE_SPEECH",
+                        "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    ]
+                ]
             generation_config: object = genai_types.GenerateContentConfig(**config_kwargs)
         else:
             generation_config = config_kwargs
-        return await asyncio.wait_for(
-            self._client.aio.models.generate_content(
-                model=self._model_name,
-                contents=req.user_prompt,
-                config=generation_config,
-            ),
-            timeout=_LLM_CALL_TIMEOUT_SECONDS,
-        )
+        for attempt in range(2):
+            try:
+                return await asyncio.wait_for(
+                    self._client.aio.models.generate_content(
+                        model=self._model_name,
+                        contents=req.user_prompt,
+                        config=generation_config,
+                    ),
+                    timeout=_LLM_CALL_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                if attempt == 1:
+                    raise
+                log.warning(
+                    "GeminiLLM._generate timed out after %ds, retrying once",
+                    _LLM_CALL_TIMEOUT_SECONDS,
+                )
 
     def _extract_response_text(self, response: object) -> str | None:
         try:
