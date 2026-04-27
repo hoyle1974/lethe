@@ -35,6 +35,7 @@ Steps executed for every `POST /v1/ingest`:
   subject | predicate | object | subject_type | object_type
   ```
 - New predicates prefixed with `NEW:` → `RefineryTriple.is_new_predicate=True`, normalized via `normalized_predicate()`
+- Extraction strategy: **key relationships only** — up to 20 triples, prioritising named entities and meaningful actions over low-value annotations. (Was "extract all, up to 50" prior to `f83af05`.)
 - `max_tokens`: `LLM_MAX_TOKENS_EXTRACTION = 32768`
 
 ---

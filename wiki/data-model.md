@@ -45,6 +45,26 @@ Pydantic model: `lethe/models/node.py::Node`
 - Stable UUID via `stable_self_id(user_id)` — deterministic, per-user
 - Content: `"Me"`
 
+**Corpus node** (`node_type="corpus"`):
+- Hub for a multi-document corpus ingestion
+- Stable UUID via `stable_corpus_node_id(corpus_id)` — deterministic SHA-1
+- `weight`: `CORPUS_NODE_WEIGHT = 1.0`
+- Content: `"Corpus '{corpus_id}': file1.py, file2.md, ..."` — searchable by name
+- `source = corpus_id`
+
+**Document node** (`node_type="document"`):
+- One per file in a corpus; linked from corpus node via `contains` edge
+- Stable UUID via `stable_document_id(corpus_id, filename)` — deterministic SHA-1
+- `weight`: `DOCUMENT_NODE_WEIGHT = 1.0`
+- Metadata stores `content_hash` (SHA-256) for idempotency checks
+- `source = corpus_id`
+
+**Chunk node** (`node_type="chunk"`):
+- Raw text chunk from a document; vector-indexed for direct semantic search
+- `weight`: `CHUNK_NODE_WEIGHT = 0.4`
+- Top-level `document_id` Firestore field (in addition to JSON metadata) for efficient tombstoning
+- `source = corpus_id`
+
 ---
 
 ## Edge (`relationships` collection)
@@ -75,7 +95,7 @@ Pydantic model: `lethe/models/node.py::Edge`
 Loaded at startup from Firestore config document. Stored in `app.state.canonical_map`.
 - `canonical_map.node_types` — list of allowed node type strings
 - `canonical_map.allowed_predicates` — list of allowed predicate strings
-- Extended at runtime: new predicates proposed by LLM with `NEW:` prefix are normalized, stored in Firestore, and appended to the in-memory list.
+- Extended at runtime: new predicates proposed by LLM with `NEW:` prefix pass through a **predicate resolution gate** (§10 in algorithms.md) — an LLM evaluation checks whether an existing predicate already covers the relationship. Only confirmed novel predicates are written to Firestore and appended to the in-memory list.
 
 ---
 
@@ -94,6 +114,14 @@ Loaded at startup from Firestore config document. Stored in `app.state.canonical
 | `EDGE_HALF_LIFE_DAYS` | `90.0` | Temporal decay for edges |
 | `TRAVERSAL_SIMILARITY_WEIGHT` | `0.7` | BFS frontier scoring: cosine weight |
 | `TRAVERSAL_OBSERVATION_WEIGHT` | `0.3` | BFS frontier scoring: observation-count weight |
+| `NODE_TYPE_CORPUS` | `"corpus"` | Node type for corpus hub nodes |
+| `CORPUS_NODE_WEIGHT` | `1.0` | Default weight for corpus hub node |
+| `NODE_TYPE_DOCUMENT` | `"document"` | Node type for document nodes |
+| `DOCUMENT_NODE_WEIGHT` | `1.0` | Default weight for document node |
+| `NODE_TYPE_CHUNK` | `"chunk"` | Node type for raw chunk nodes |
+| `CHUNK_NODE_WEIGHT` | `0.4` | Default weight for chunk nodes |
+| `DEFAULT_CHUNK_SIZE` | `600` | Default words per chunk |
+| `LLM_MAX_TOKENS_PREDICATE_RESOLUTION` | `256` | Max tokens for predicate resolution gate |
 
 ---
 
@@ -102,4 +130,6 @@ Loaded at startup from Firestore config document. Stored in `app.state.canonical
 - **Log nodes**: `str(uuid.uuid4())` — random UUID per ingest
 - **Entity nodes**: `stable_entity_doc_id(node_type, name)` — deterministic hash of `(node_type, lowercase_name)`; ensures deduplication
 - **SELF node**: `stable_self_id(user_id)` — deterministic per user
+- **Corpus nodes**: `stable_corpus_node_id(corpus_id)` → `"corpus_" + sha1("corpus:" + corpus_id)`
+- **Document nodes**: `stable_document_id(corpus_id, filename)` → `"doc_" + sha1(corpus_id + ":" + filename)`
 - **Edges**: UUID generated at relationship creation time

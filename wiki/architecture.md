@@ -45,7 +45,7 @@
 | Module | Responsibilities |
 |--------|-----------------|
 | `lethe/routers/admin.py` | GET /v1/health, GET /v1/node-types, POST /v1/admin/consolidate, POST /v1/admin/backfill |
-| `lethe/routers/ingest.py` | POST /v1/ingest |
+| `lethe/routers/ingest.py` | POST /v1/ingest, POST /v1/ingest/corpus |
 | `lethe/routers/search.py` | POST /v1/search |
 | `lethe/routers/graph.py` | POST /v1/graph/expand, POST /v1/graph/summarize |
 | `lethe/routers/nodes.py` | GET /v1/nodes/{uuid}, GET /v1/nodes |
@@ -59,6 +59,20 @@ POST /v1/ingest
     → extract_triples() via Gemini [lethe/graph/extraction.py]
     → for each triple: resolve terms → ensure_node() → create_relationship_node()
   → return IngestResponse
+```
+
+## Data Flow (Corpus Ingest)
+```
+POST /v1/ingest/corpus
+  → router calls run_corpus_ingest() [lethe/graph/corpus.py]
+    → Phase 1 (parallel): upsert corpus node + classify all documents (content_hash check)
+    → Phase 2 (parallel, max 3 concurrent LLM): for each new/changed document:
+        → tombstone old chunks (if changed)
+        → summarize_document() via Gemini
+        → run_ingest(summary) → entity + relationship nodes
+        → chunk_document() → store chunk nodes (no LLM)
+        → _ingest_structural_edges() (code files only, no LLM)
+  → return CorpusIngestResponse
 ```
 
 ## Data Flow (Search)
