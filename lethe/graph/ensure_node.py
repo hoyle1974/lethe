@@ -17,6 +17,7 @@ from lethe.constants import (
     EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     RELATIONSHIP_SUPERSEDE_CANDIDATE_LIMIT,
 )
+from lethe.graph.canonical_map import append_predicate
 from lethe.graph.contradiction import evaluate_relationship_supersedes, tombstone_relationship
 from lethe.graph.ids import GENERATED_ID_RE
 from lethe.graph.serialization import doc_to_node
@@ -274,6 +275,7 @@ async def create_relationship_node(
     llm: Optional[LLMDispatcher] = None,
 ) -> str:
     """Create or update a reified relationship node. Returns the relationship document ID."""
+    is_new_predicate = predicate.strip().upper().startswith("NEW:")
     predicate = normalized_predicate(predicate)
     if not subject_id or not object_id or not predicate:
         raise ValueError("create_relationship_node: subject, predicate, object required")
@@ -337,6 +339,8 @@ async def create_relationship_node(
         return rel_id
 
     rid = await _txn_create_or_update(db.transaction())
+    if is_new_predicate:
+        await append_predicate(db, predicate)
     if superseded_id and superseded_id != rid:
         candidate_ids = {u for u, _ in existing_facts}
         if superseded_id in candidate_ids:

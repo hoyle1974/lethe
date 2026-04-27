@@ -46,15 +46,21 @@ async def test_load_returns_stored_values():
 
 
 @pytest.mark.asyncio
-async def test_append_predicate():
+async def test_append_predicate_uses_set_merge_not_update():
+    """append_predicate must use set(merge=True) so it works on unseeded docs."""
     mock_ref = AsyncMock()
+    mock_ref.set = AsyncMock()
     mock_ref.update = AsyncMock()
     mock_db = MagicMock()
     mock_db.collection.return_value.document.return_value = mock_ref
 
     await append_predicate(mock_db, "mentors")
 
-    mock_ref.update.assert_called_once()
+    mock_ref.set.assert_called_once()
+    mock_ref.update.assert_not_called()
+    # Confirm merge=True was passed
+    _, kwargs = mock_ref.set.call_args
+    assert kwargs.get("merge") is True
 
 
 def test_canonical_map_defaults():
