@@ -198,14 +198,14 @@ Then, for each document (Phase 2, runs up to 5 concurrently):
 7. **Chunk document** — `chunk_document(text, filename, chunk_size)` in `lethe/graph/chunk.py` dispatches to:
    - **Code** (`.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.go`, `.rs`, `.c`, `.cpp`, `.h`, `.cs`, `.rb`, `.swift`, `.kt`): splits on top-level `def`/`class`/`async def` lines; prepends file preamble (imports) to each chunk; falls back to prose if no top-level defs found. Oversized blocks (>chunk_size×2 words) are split as prose with preamble re-injected into every sub-chunk.
    - **Prose** (all other extensions): splits on `\n\n`, accumulates up to `chunk_size` words, carries 1 trailing paragraph as overlap into the next chunk.
-8. **Store chunk nodes** — each chunk written as `node_type="chunk"`, `weight=0.4`, vector-indexed. `document_id` stored both in JSON metadata and as a top-level field. No LLM extraction.
+8. **Store chunk nodes (Phase A — parallel)** — all chunks for a document are created simultaneously via `asyncio.gather`. Each is written as `node_type="chunk"`, `weight=0.4`, vector-indexed. `document_id` stored in both JSON metadata and as a top-level field. No LLM extraction.
 9. **`has_summary` edge** — immediately after merging the summary `run_ingest` result, writes `document --[has_summary]--> summary_log_node`. Bridges the corpus graph to the SPO graph so BFS can walk from a document into its extracted entities.
-10. **Entity fetch for lexical linking** — collects unique entity UUIDs from `summary_result.nodes_created + nodes_updated`, fetches them via `db.get_all()`, and builds `summary_entities = [(uuid, content), ...]` (non-log nodes only) for use in the chunk loop.
-11. **Chunk loop** — for each chunk (sequential):
-    - **`next_chunk` edge**: if a previous chunk exists, writes `chunk_{i-1} --[next_chunk]--> chunk_i`. Allows sliding-window context retrieval.
-    - **`mentioned_in` edges**: for every entity in `summary_entities` whose name matches `\b{name}\b` (case-insensitive) in the chunk text, writes `entity --[mentioned_in]--> chunk`. Bridges entity nodes to raw passages.
-12. **`has_chunk` edges** — after all chunk nodes are created, concurrent `asyncio.gather` writes one `document --[has_chunk]--> chunk` edge per chunk. These are structural (`llm=None`), enabling BFS traversal from the document to its raw content.
-13. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
+10. **Entity fetch for lexical linking** — collects unique entity UUIDs from `summary_result.nodes_created + nodes_updated`, fetches them via `db.get_all()`, and builds `summary_entities = [(uuid, content), ...]` (non-log nodes only).
+11. **Chunk edges (Phase B — parallel)** — once all chunk IDs are known from Phase A, a single `asyncio.gather` creates all three edge types concurrently:
+    - **`has_chunk`**: one `document --[has_chunk]--> chunk` edge per chunk.
+    - **`next_chunk`**: `chunk_{i-1} --[next_chunk]--> chunk_i` for consecutive pairs.
+    - **`mentioned_in`**: for every entity in `summary_entities` whose name matches `\b{name}\b` (case-insensitive) in the chunk text, writes `entity --[mentioned_in]--> chunk`.
+12. **Structural edges for code files** — if `detect_chunk_strategy(filename) == "code"`, `_ingest_structural_edges()` calls `extract_structural_triples(text, filename)` and writes entity + relationship nodes without LLM:
     - `.py` files: stdlib `ast` parser extracts `(module, imports, dep)`, `(module, defines, fn)`, `(ClassName, has_method, fn)` triples.
     - Other code types: regex-based import extraction.
     - Entity node types: `module` for subjects/import targets, `function` for defines/has_method targets.
@@ -228,16 +228,17 @@ structural edges  (predicate="imports"|"defines"|"has_method")  [code files only
 
 ### Completion signalling
 
-Each document node receives a `pipeline_done_at` ISO timestamp written at the exact moment its work is done:
+Each document node receives a `pipeline_done_at` ISO timestamp when its work is done:
 
 - **Unchanged docs** (`content_hash` matches): written by `_upsert_document_node` immediately on skip.
-- **New/changed docs**: written at the end of `_process_document_pipeline` after all edges are created.
+- **Successful docs**: written at the end of `_run_document_pipeline` after all edges are created.
+- **Failed docs**: written by the `_process_document_pipeline` error handler with `pipeline_error="failed"`.
 
-The `POST /v1/ingest/corpus` 202 response includes `ingest_ts` (the timestamp at request time). The status endpoint `POST /v1/ingest/corpus/{corpus_id}/status` batch-fetches all document nodes via `db.get_all()` and counts those where `pipeline_done_at >= ingest_ts`. The script polls this endpoint and shows a spinner progress display.
+The `POST /v1/ingest/corpus` 202 response includes `ingest_ts`. The status endpoint `POST /v1/ingest/corpus/{corpus_id}/status` batch-fetches all document nodes and counts those where `pipeline_done_at >= ingest_ts`, split into `completed` (no `pipeline_error`) and `failed` (has `pipeline_error`). `is_complete = completed + failed >= total`. The script polls this and shows progress; a non-zero `failed` count triggers a warning with server-log advice.
 
 ### Fault isolation in Phase 2
 
-Phase 2 uses `asyncio.gather(..., return_exceptions=True)`. A transient error in one document's pipeline (e.g. `httpx.ConnectError` to the Gemini API) is logged and skipped; all other documents proceed normally and are included in the result. Without this, a single network blip would abort the entire corpus ingest.
+Phase 2 uses `asyncio.gather(..., return_exceptions=True)`. `_process_document_pipeline` wraps the inner pipeline in try/except: on any exception it logs the full traceback and filename, writes `pipeline_done_at` + `pipeline_error="failed"` to Firestore, then re-raises. The outer gather catches the re-raise; all other documents proceed normally. Without `pipeline_done_at` on failure, failed documents would never appear in the status count and the client would hang until `MAX_WAIT`.
 
 ### Constants
 

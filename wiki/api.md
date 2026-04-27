@@ -117,6 +117,33 @@ nodes and edges are tagged `source=corpus_id`. Re-submitting with the same
 
 ---
 
+## POST /v1/ingest/corpus/{corpus_id}/status
+Poll ingestion progress for a corpus. Returns per-document completion counts.
+
+**Request** (`CorpusStatusRequest`):
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `document_ids` | list[str] | yes | IDs returned by the 202 response |
+| `user_id` | string | no | `"global"` |
+| `ingest_ts` | string | no | `ingest_ts` from the 202 response — filters out stale `pipeline_done_at` values from prior runs |
+
+**Response** (`CorpusStatusResponse`) — `200 OK`:
+```json
+{
+  "corpus_id": "my-corpus",
+  "total": 37,
+  "completed": 34,
+  "failed": 3,
+  "is_complete": true
+}
+```
+
+`is_complete` is `true` when `completed + failed >= total`. Failed documents have `pipeline_done_at` written with `pipeline_error="failed"` — they are counted separately so callers can distinguish success from partial failure. Check server logs for the full traceback when `failed > 0`.
+
+Duplicate `document_ids` are deduplicated server-side before fetching.
+
+---
+
 ## POST /v1/ingest/corpus/document
 Internal fan-out endpoint. Called by `POST /v1/ingest/corpus` (fan-out mode) to
 process one document per Cloud Run invocation.

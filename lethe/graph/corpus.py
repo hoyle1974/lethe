@@ -341,7 +341,7 @@ async def _ingest_structural_edges(
     seen_updated: set[str] = set()
     seen_relationships: set[str] = set()
 
-    log.info("corpus: structural edges filename=%r triples=%d", filename, len(triples))
+    log.info("corpus: structural edges start filename=%r triples=%d", filename, len(triples))
     for subj, pred, obj in triples:
         subj_type = "module"
         obj_type = _STRUCTURAL_PREDICATE_OBJECT_TYPE.get(pred, "generic")
@@ -402,6 +402,12 @@ async def _ingest_structural_edges(
             seen_relationships.add(rel_id)
             relationships_created.append(rel_id)
 
+    log.info(
+        "corpus: structural edges complete filename=%r nodes=%d rels=%d",
+        filename,
+        len(nodes_created) + len(nodes_updated),
+        len(relationships_created),
+    )
     return nodes_created, nodes_updated, relationships_created
 
 
@@ -431,6 +437,64 @@ class _RateLimitedLLM:
 
 
 async def _process_document_pipeline(
+    db: firestore.AsyncClient,
+    embedder: Embedder,
+    llm: LLMDispatcher,
+    config: Config,
+    canonical_map: CanonicalMap,
+    doc: DocumentItem,
+    doc_id: str,
+    is_new: bool,
+    is_changed: bool,
+    corpus_id: str,
+    corpus_node_id: str,
+    user_id: str,
+    domain: str,
+    chunk_size: int,
+    ts: str,
+    doc_idx: int,
+    total_docs: int,
+) -> _DocPipelineResult:
+    try:
+        return await _run_document_pipeline(
+            db=db,
+            embedder=embedder,
+            llm=llm,
+            config=config,
+            canonical_map=canonical_map,
+            doc=doc,
+            doc_id=doc_id,
+            is_new=is_new,
+            is_changed=is_changed,
+            corpus_id=corpus_id,
+            corpus_node_id=corpus_node_id,
+            user_id=user_id,
+            domain=domain,
+            chunk_size=chunk_size,
+            ts=ts,
+            doc_idx=doc_idx,
+            total_docs=total_docs,
+        )
+    except Exception:
+        log.exception(
+            "corpus: [%d/%d] pipeline failed filename=%r doc_id=%s",
+            doc_idx + 1,
+            total_docs,
+            doc.filename,
+            doc_id,
+        )
+        try:
+            await (
+                db.collection(config.lethe_collection)
+                .document(doc_id)
+                .update({"pipeline_done_at": ts, "pipeline_error": "failed"})
+            )
+        except Exception:
+            log.warning("corpus: could not write pipeline_done_at for failed doc_id=%s", doc_id)
+        raise
+
+
+async def _run_document_pipeline(
     db: firestore.AsyncClient,
     embedder: Embedder,
     llm: LLMDispatcher,
@@ -580,87 +644,86 @@ async def _process_document_pipeline(
         len(chunks),
         doc_id,
     )
-    chunk_ids: list[str] = []
-    prev_chunk_id: str | None = None
-    for i, chunk_text in enumerate(chunks):
-        chunk_id = await _create_chunk_node(
-            db=db,
-            embedder=embedder,
-            config=config,
-            text=chunk_text,
-            document_id=doc_id,
-            corpus_id=corpus_id,
-            filename=doc.filename,
-            chunk_index=i,
-            user_id=user_id,
-            domain=domain,
-            ts=ts,
-        )
-        chunk_ids.append(chunk_id)
-
-        # Task 3a: chain consecutive chunks
-        if prev_chunk_id is not None:
-            nc_rel_id = await create_relationship_node(
-                db=db,
-                embedder=embedder,
-                config=config,
-                subject_id=prev_chunk_id,
-                predicate="next_chunk",
-                object_id=chunk_id,
-                source_entry_id=doc_id,
-                subject_content=f"chunk {i - 1} of {doc.filename}",
-                object_content=f"chunk {i} of {doc.filename}",
-                timestamp=ts,
-                user_id=user_id,
-                llm=None,
-            )
-            if nc_rel_id not in seen_relationships:
-                seen_relationships.add(nc_rel_id)
-                relationships_created.append(nc_rel_id)
-
-        # Task 3b: link entities whose name appears in this chunk
-        for entity_id, entity_content in summary_entities:
-            if re.search(rf"\b{re.escape(entity_content)}\b", chunk_text, re.IGNORECASE):
-                mi_rel_id = await create_relationship_node(
+    # Phase A: create all chunk nodes in parallel.
+    chunk_ids: list[str] = list(
+        await asyncio.gather(
+            *[
+                _create_chunk_node(
                     db=db,
                     embedder=embedder,
                     config=config,
-                    subject_id=entity_id,
-                    predicate="mentioned_in",
-                    object_id=chunk_id,
-                    source_entry_id=doc_id,
-                    subject_content=entity_content,
-                    object_content=f"chunk {i} of {doc.filename}",
-                    timestamp=ts,
+                    text=chunk_text,
+                    document_id=doc_id,
+                    corpus_id=corpus_id,
+                    filename=doc.filename,
+                    chunk_index=i,
                     user_id=user_id,
-                    llm=None,
+                    domain=domain,
+                    ts=ts,
                 )
-                if mi_rel_id not in seen_relationships:
-                    seen_relationships.add(mi_rel_id)
-                    relationships_created.append(mi_rel_id)
-
-        prev_chunk_id = chunk_id
-
-    has_chunk_rel_ids: list[str] = await asyncio.gather(
-        *[
-            create_relationship_node(
-                db=db,
-                embedder=embedder,
-                config=config,
-                subject_id=doc_id,
-                predicate="has_chunk",
-                object_id=chunk_id,
-                source_entry_id=doc_id,
-                subject_content=f"document {doc.filename}",
-                object_content=f"chunk {i} of {doc.filename}",
-                timestamp=ts,
-                user_id=user_id,
-                llm=None,
-            )
-            for i, chunk_id in enumerate(chunk_ids)
-        ]
+                for i, chunk_text in enumerate(chunks)
+            ]
+        )
     )
-    for rel_id in has_chunk_rel_ids:
+
+    # Phase B: create all chunk-related edges in parallel once IDs are known.
+    #   has_chunk (doc → each chunk)
+    #   next_chunk (chunk[i-1] → chunk[i])
+    #   mentioned_in (entity → chunk where the entity name appears)
+    chunk_edge_tasks = [
+        create_relationship_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            subject_id=doc_id,
+            predicate="has_chunk",
+            object_id=chunk_id,
+            source_entry_id=doc_id,
+            subject_content=f"document {doc.filename}",
+            object_content=f"chunk {i} of {doc.filename}",
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+        for i, chunk_id in enumerate(chunk_ids)
+    ]
+    chunk_edge_tasks += [
+        create_relationship_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            subject_id=chunk_ids[i - 1],
+            predicate="next_chunk",
+            object_id=chunk_ids[i],
+            source_entry_id=doc_id,
+            subject_content=f"chunk {i - 1} of {doc.filename}",
+            object_content=f"chunk {i} of {doc.filename}",
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+        for i in range(1, len(chunk_ids))
+    ]
+    chunk_edge_tasks += [
+        create_relationship_node(
+            db=db,
+            embedder=embedder,
+            config=config,
+            subject_id=entity_id,
+            predicate="mentioned_in",
+            object_id=chunk_ids[i],
+            source_entry_id=doc_id,
+            subject_content=entity_content,
+            object_content=f"chunk {i} of {doc.filename}",
+            timestamp=ts,
+            user_id=user_id,
+            llm=None,
+        )
+        for i, chunk_text in enumerate(chunks)
+        for entity_id, entity_content in summary_entities
+        if re.search(rf"\b{re.escape(entity_content)}\b", chunk_text, re.IGNORECASE)
+    ]
+    for rel_id in await asyncio.gather(*chunk_edge_tasks):
         if rel_id not in seen_relationships:
             seen_relationships.add(rel_id)
             relationships_created.append(rel_id)

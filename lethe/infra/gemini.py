@@ -37,30 +37,48 @@ class GeminiEmbedder:
         text: str,
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     ) -> list[float]:
-        result = await asyncio.wait_for(
-            self._client.aio.models.embed_content(
-                model=self._model_name,
-                contents=text,
-                config=genai_types.EmbedContentConfig(task_type=task_type),
-            ),
-            timeout=_EMBED_CALL_TIMEOUT_SECONDS,
-        )
-        return list(result.embeddings[0].values)
+        for attempt in range(2):
+            try:
+                result = await asyncio.wait_for(
+                    self._client.aio.models.embed_content(
+                        model=self._model_name,
+                        contents=text,
+                        config=genai_types.EmbedContentConfig(task_type=task_type),
+                    ),
+                    timeout=_EMBED_CALL_TIMEOUT_SECONDS,
+                )
+                return list(result.embeddings[0].values)
+            except asyncio.TimeoutError:
+                if attempt == 1:
+                    raise
+                log.warning(
+                    "GeminiEmbedder.embed timed out after %ds, retrying once",
+                    _EMBED_CALL_TIMEOUT_SECONDS,
+                )
 
     async def embed_batch(
         self,
         texts: list[str],
         task_type: EmbeddingTaskType = EMBEDDING_TASK_RETRIEVAL_DOCUMENT,
     ) -> list[list[float]]:
-        result = await asyncio.wait_for(
-            self._client.aio.models.embed_content(
-                model=self._model_name,
-                contents=texts,
-                config=genai_types.EmbedContentConfig(task_type=task_type),
-            ),
-            timeout=_EMBED_CALL_TIMEOUT_SECONDS,
-        )
-        return [list(e.values) for e in result.embeddings]
+        for attempt in range(2):
+            try:
+                result = await asyncio.wait_for(
+                    self._client.aio.models.embed_content(
+                        model=self._model_name,
+                        contents=texts,
+                        config=genai_types.EmbedContentConfig(task_type=task_type),
+                    ),
+                    timeout=_EMBED_CALL_TIMEOUT_SECONDS,
+                )
+                return [list(e.values) for e in result.embeddings]
+            except asyncio.TimeoutError:
+                if attempt == 1:
+                    raise
+                log.warning(
+                    "GeminiEmbedder.embed_batch timed out after %ds, retrying once",
+                    _EMBED_CALL_TIMEOUT_SECONDS,
+                )
 
 
 class GeminiLLM:

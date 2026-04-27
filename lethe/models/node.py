@@ -187,6 +187,7 @@ class CorpusStatusResponse(BaseModel):
     corpus_id: str
     total: int
     completed: int
+    failed: int = 0
     is_complete: bool
 
 

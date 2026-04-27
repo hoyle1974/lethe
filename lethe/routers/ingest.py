@@ -236,15 +236,21 @@ async def corpus_ingest_status(
     unique_ids = list(dict.fromkeys(req.document_ids))
     refs = [db.collection(config.lethe_collection).document(doc_id) for doc_id in unique_ids]
     completed = 0
+    failed = 0
     async for snap in db.get_all(refs):
-        done_at = (snap.to_dict() or {}).get("pipeline_done_at") if snap.exists else None
+        data = (snap.to_dict() or {}) if snap.exists else {}
+        done_at = data.get("pipeline_done_at")
         if done_at and (not req.ingest_ts or done_at >= req.ingest_ts):
-            completed += 1
+            if data.get("pipeline_error"):
+                failed += 1
+            else:
+                completed += 1
 
     total = len(unique_ids)
     return CorpusStatusResponse(
         corpus_id=corpus_id,
         total=total,
         completed=completed,
-        is_complete=completed >= total,
+        failed=failed,
+        is_complete=(completed + failed) >= total,
     )

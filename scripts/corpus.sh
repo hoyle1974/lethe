@@ -1,12 +1,13 @@
 #!/bin/bash
 #
 # Ingest a corpus of files into the Lethe graph.
-# Usage: ./scripts/corpus.sh [--instance=X] [-domain=X] [-user-id=X] -corpus-id=<id> <file1> [file2] ...
+# Usage: ./scripts/corpus.sh [--instance=X] [-domain=X] [-user-id=X] [--max-wait=N] -corpus-id=<id> <file1> [file2] ...
 #
 # Examples:
 #   ./scripts/corpus.sh -corpus-id="Project Zum" src/main.py src/utils.py
 #   ./scripts/corpus.sh --instance=staging -corpus-id="lethe" -domain=code lethe/graph/*.py
 #   ./scripts/corpus.sh -corpus-id="docs" -user-id=alice README.md docs/design.md
+#   ./scripts/corpus.sh --max-wait=3600 -corpus-id="large-corpus" src/**/*.py
 #
 set -e
 
@@ -47,6 +48,7 @@ SERVICE_NAME="lethe-api"
 CORPUS_ID=""
 DOMAIN=""
 USER_ID="global"
+MAX_WAIT=1800
 FILES=()
 
 idx=0
@@ -91,6 +93,17 @@ while [ "$idx" -lt "${#args[@]}" ]; do
       fi
       USER_ID="${args[$idx]}"
       ;;
+    -max-wait=*|--max-wait=*)
+      MAX_WAIT="${arg#*=}"
+      ;;
+    -max-wait|--max-wait)
+      idx=$((idx + 1))
+      if [ "$idx" -ge "${#args[@]}" ]; then
+        echo "Error: $arg requires a value"
+        exit 1
+      fi
+      MAX_WAIT="${args[$idx]}"
+      ;;
     *)
       FILES+=("$arg")
       ;;
@@ -98,7 +111,7 @@ while [ "$idx" -lt "${#args[@]}" ]; do
   idx=$((idx + 1))
 done
 
-USAGE="Usage: $0 [--instance=X] [-domain=X] [-user-id=X] -corpus-id=<id> <file1> [file2] ..."
+USAGE="Usage: $0 [--instance=X] [-domain=X] [-user-id=X] [--max-wait=N] -corpus-id=<id> <file1> [file2] ..."
 
 if [ -z "$CORPUS_ID" ]; then
   echo "Error: -corpus-id is required"
@@ -206,12 +219,12 @@ echo "documents:  $DOC_COUNT"
 
 # Poll for completion when we have document IDs and an ingest timestamp
 if [ "$DOC_COUNT" -gt 0 ] && [ -n "$INGEST_TS" ] && [ "$INGEST_TS" != "null" ]; then
-  MAX_WAIT=600
   INTERVAL=5
   ELAPSED=0
   SPIN=('|' '/' '-' '\')
   SI=0
 
+  set +e
   while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
     STATUS_RESP=$(curl -s -o /tmp/lethe_status_response.json -w "%{http_code}" \
       -X POST "$BASE_URL/v1/ingest/corpus/$CORPUS_ID_RESP/status" \
@@ -224,27 +237,41 @@ if [ "$DOC_COUNT" -gt 0 ] && [ -n "$INGEST_TS" ] && [ "$INGEST_TS" != "null" ]; 
       }")
 
     COMPLETED=0
+    FAILED=0
     IS_COMPLETE=false
     if [ "$STATUS_RESP" = "200" ]; then
       COMPLETED=$(jq -r '.completed // 0' /tmp/lethe_status_response.json 2>/dev/null || echo 0)
+      FAILED=$(jq -r '.failed // 0' /tmp/lethe_status_response.json 2>/dev/null || echo 0)
       IS_COMPLETE=$(jq -r '.is_complete // false' /tmp/lethe_status_response.json 2>/dev/null || echo false)
     fi
 
-    printf "\r  %s Processing: %d/%d documents  (%ds)" \
-      "${SPIN[$SI]}" "$COMPLETED" "$DOC_COUNT" "$ELAPSED"
+    IN_PIPELINE=$(( DOC_COUNT - COMPLETED - FAILED ))
+    if [ "$FAILED" -gt 0 ]; then
+      printf "\r  %s Completed: %d/%d  failed: %d  (in pipeline: %d)  (%ds)  " \
+        "${SPIN[$SI]}" "$COMPLETED" "$DOC_COUNT" "$FAILED" "$IN_PIPELINE" "$ELAPSED"
+    else
+      printf "\r  %s Completed: %d/%d  (in pipeline: %d)  (%ds)  " \
+        "${SPIN[$SI]}" "$COMPLETED" "$DOC_COUNT" "$IN_PIPELINE" "$ELAPSED"
+    fi
     SI=$(( (SI + 1) % 4 ))
 
     if [ "$IS_COMPLETE" = "true" ]; then
-      printf "\n\nIngestion complete (%ds)\n" "$ELAPSED"
-      # Terminal bell + macOS voice notification (silent-fail if unavailable)
-      printf '\a'
-      osascript -e 'say "Corpus ingestion complete"' 2>/dev/null || true
+      if [ "$FAILED" -gt 0 ]; then
+        printf "\n\nIngestion done with %d failure(s) — check server logs (%ds)\n" "$FAILED" "$ELAPSED"
+        printf '\a'
+        osascript -e "say \"Corpus ingestion done, ${FAILED} failed\"" 2>/dev/null || true
+      else
+        printf "\n\nIngestion complete (%ds)\n" "$ELAPSED"
+        printf '\a'
+        osascript -e 'say "Corpus ingestion complete"' 2>/dev/null || true
+      fi
       break
     fi
 
     sleep "$INTERVAL"
     ELAPSED=$(( ELAPSED + INTERVAL ))
   done
+  set -e
 
   if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
     printf "\nWarning: timed out after %ds — processing may still be ongoing.\n" "$MAX_WAIT"
